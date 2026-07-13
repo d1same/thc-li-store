@@ -109,6 +109,20 @@
   const adminMenu = $('[data-admin-menu]');
   const adminNav = $('[data-admin-nav]');
   if (adminMenu && adminNav) adminMenu.addEventListener('click', () => adminNav.classList.toggle('open'));
+  const adminCollapse = $('[data-admin-collapse]');
+  if (adminCollapse) {
+    const setAdminSidebar = (collapsed, remember = true) => {
+      document.documentElement.classList.toggle('admin-nav-collapsed', collapsed);
+      adminCollapse.setAttribute('aria-expanded', String(!collapsed));
+      adminCollapse.setAttribute('aria-label', collapsed ? 'Expand admin navigation' : 'Collapse admin navigation');
+      adminCollapse.setAttribute('title', collapsed ? 'Expand navigation' : 'Collapse navigation');
+      if (remember) {
+        try { localStorage.setItem('thcli_admin_sidebar', collapsed ? 'collapsed' : 'expanded'); } catch {}
+      }
+    };
+    setAdminSidebar(document.documentElement.classList.contains('admin-nav-collapsed'), false);
+    adminCollapse.addEventListener('click', () => setAdminSidebar(!document.documentElement.classList.contains('admin-nav-collapsed')));
+  }
 
   const ageGate = $('[data-age-gate]');
   if (ageGate && localStorage.getItem('thcli_age_verified') !== 'yes') {

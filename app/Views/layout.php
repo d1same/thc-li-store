@@ -12,6 +12,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="<?= asset('app.css') ?>">
   <script>window.SHOP={base:<?= json_encode(rtrim(url(''), '/')) ?>,csrf:<?= json_encode(csrf_token()) ?>};</script>
+  <?php if ($adminArea): ?><script>try{if(localStorage.getItem('thcli_admin_sidebar')==='collapsed')document.documentElement.classList.add('admin-nav-collapsed')}catch{}</script><?php endif; ?>
   <script defer src="<?= asset('app.js') ?>"></script>
   <script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
 </head>
@@ -39,18 +40,21 @@
     </nav>
   <?php else: ?>
     <header class="admin-header">
-      <a class="brand brand-light" href="<?= url('admin') ?>"><img class="brand-icon" src="<?= asset('brand/thc-li-icon-v2.png') ?>" alt=""><span>Owner desk</span></a>
+      <div class="admin-sidebar-head">
+        <a class="brand brand-light" href="<?= url('admin') ?>" title="Owner desk"><img class="brand-icon" src="<?= asset('brand/thc-li-icon-v2.png') ?>" alt=""><span>Owner desk</span></a>
+        <button class="admin-collapse-button" type="button" data-admin-collapse aria-label="Collapse admin navigation" aria-expanded="true" title="Collapse navigation"><i class="admin-collapse-icon" data-lucide="panel-left-close"></i><i class="admin-expand-icon" data-lucide="panel-left-open"></i></button>
+      </div>
       <button class="icon-button admin-menu-button" data-admin-menu aria-label="Open admin navigation"><i data-lucide="menu"></i></button>
       <nav class="admin-nav" data-admin-nav>
-        <a href="<?= url('admin') ?>"><i data-lucide="layout-dashboard"></i>Overview</a>
-        <?php if (can('pos.access')): ?><a href="<?= url('admin/pos') ?>"><i data-lucide="tablet-smartphone"></i>Point of sale</a><?php endif; ?>
-        <?php if (can('orders.view')): ?><a href="<?= url('admin/orders') ?>"><i data-lucide="package-check"></i>Orders</a><?php endif; ?>
-        <?php if (can('products.view')): ?><a href="<?= url('admin/products') ?>"><i data-lucide="package-open"></i>Products</a><?php endif; ?>
-        <?php if (can('promotions.manage')): ?><a href="<?= url('admin/promotions') ?>"><i data-lucide="badge-percent"></i>Promotions</a><?php endif; ?>
-        <?php if (can('settings.manage')): ?><a href="<?= url('admin/settings') ?>"><i data-lucide="sliders-horizontal"></i>Settings</a><?php endif; ?>
-        <?php if (($user['role'] ?? '') === 'owner'): ?><a href="<?= url('admin/staff') ?>"><i data-lucide="users-round"></i>Staff</a><?php endif; ?>
-        <a href="<?= url('') ?>"><i data-lucide="store"></i>View shop</a>
-        <form method="post" action="<?= url('logout') ?>"><?= csrf_field() ?><button type="submit"><i data-lucide="log-out"></i>Sign out</button></form>
+        <a href="<?= url('admin') ?>" title="Overview"><i data-lucide="layout-dashboard"></i><span>Overview</span></a>
+        <?php if (can('pos.access')): ?><a href="<?= url('admin/pos') ?>" title="Point of sale"><i data-lucide="tablet-smartphone"></i><span>Point of sale</span></a><?php endif; ?>
+        <?php if (can('orders.view')): ?><a href="<?= url('admin/orders') ?>" title="Orders"><i data-lucide="package-check"></i><span>Orders</span></a><?php endif; ?>
+        <?php if (can('products.view')): ?><a href="<?= url('admin/products') ?>" title="Products"><i data-lucide="package-open"></i><span>Products</span></a><?php endif; ?>
+        <?php if (can('promotions.manage')): ?><a href="<?= url('admin/promotions') ?>" title="Promotions"><i data-lucide="badge-percent"></i><span>Promotions</span></a><?php endif; ?>
+        <?php if (can('settings.manage')): ?><a href="<?= url('admin/settings') ?>" title="Settings"><i data-lucide="sliders-horizontal"></i><span>Settings</span></a><?php endif; ?>
+        <?php if (($user['role'] ?? '') === 'owner'): ?><a href="<?= url('admin/staff') ?>" title="Staff"><i data-lucide="users-round"></i><span>Staff</span></a><?php endif; ?>
+        <a href="<?= url('') ?>" title="View shop"><i data-lucide="store"></i><span>View shop</span></a>
+        <form method="post" action="<?= url('logout') ?>"><?= csrf_field() ?><button type="submit" title="Sign out"><i data-lucide="log-out"></i><span>Sign out</span></button></form>
       </nav>
     </header>
   <?php endif; ?>
