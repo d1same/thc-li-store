@@ -213,6 +213,19 @@
     const canComplete = root.dataset.canComplete === '1' && root.dataset.posEnabled === '1';
     const form = $('[data-pos-form]', root);
     const discountInput = $('[data-pos-discount-input]', root);
+    const catalogNode = $('[data-pos-catalog-json]', root);
+    const modal = $('[data-pos-modal]', root);
+    const cartPanel = $('[data-pos-cart-panel]', root);
+    const cartDock = $('[data-pos-cart-open]', root);
+    let catalog = [];
+    try { catalog = JSON.parse(catalogNode?.textContent || '[]'); } catch { catalog = []; }
+    const products = new Map(catalog.map((product) => [Number(product.id), product]));
+    const modalSelections = new Map();
+    let activeProduct = null;
+    let selectedVariantId = null;
+    let modalQuantity = 1;
+    let lastProductTrigger = null;
+    let modalCloseTimer = null;
 
     const read = () => {
       try { return JSON.parse(sessionStorage.getItem(storageKey) || '[]'); } catch { return []; }
@@ -223,26 +236,32 @@
     };
     const totalQuantity = (cart) => cart.reduce((sum, item) => sum + Number(item.quantity), 0);
 
-    function render() {
-      const cart = read();
+    function totals(cart) {
       const subtotal = cart.reduce((sum, item) => sum + Number(item.price) * Number(item.quantity), 0);
       const discountPercent = discountEnabled ? Math.max(0, Number(discountInput?.value) || 0) : 0;
       const discount = Math.min(subtotal, Math.round(subtotal * discountPercent / 100));
       const tax = taxEnabled ? Math.round((subtotal - discount) * taxRate / 100) : 0;
-      const total = subtotal - discount + tax;
+      return { subtotal, discount, tax, total: subtotal - discount + tax };
+    }
+
+    function render() {
+      const cart = read();
+      const { subtotal, discount, tax, total } = totals(cart);
       const items = $('[data-pos-cart-items]', root);
       if (items) items.innerHTML = cart.length ? cart.map((item) => `
         <article class="pos-cart-line">
-          <div><strong>${escapeHtml(item.product_name)}</strong><small>${escapeHtml(item.variant_label)}</small></div>
+          <div><strong>${escapeHtml(item.product_name)}</strong><small>${escapeHtml(item.variant_label)}${item.stock_quantity === null ? '' : ` · ${Number(item.stock_quantity)} available`}</small></div>
           <b>${money(Number(item.price) * Number(item.quantity))}</b>
           <div class="pos-cart-quantity"><button type="button" data-pos-minus="${Number(item.variant_id)}" aria-label="Reduce quantity">−</button><span>${Number(item.quantity)}</span><button type="button" data-pos-plus="${Number(item.variant_id)}" aria-label="Increase quantity">+</button></div>
-        </article>`).join('') : '<div class="empty-cart"><i data-lucide="shopping-basket"></i><strong>Cart is empty</strong><p>Tap a product option to add it.</p></div>';
+        </article>`).join('') : '<div class="empty-cart"><i data-lucide="shopping-basket"></i><strong>Cart is empty</strong><p>Tap a product to choose an option.</p></div>';
       const values = {
         '[data-pos-cart-count]': String(totalQuantity(cart)),
         '[data-pos-subtotal]': money(subtotal),
         '[data-pos-discount]': `−${money(discount)}`,
         '[data-pos-tax]': money(tax),
         '[data-pos-total]': money(total),
+        '[data-pos-dock-count]': String(totalQuantity(cart)),
+        '[data-pos-dock-total]': money(total),
       };
       Object.entries(values).forEach(([selector, value]) => { const node = $(selector, root); if (node) node.textContent = value; });
       const discountRow = $('[data-pos-discount-row]', root);
@@ -251,21 +270,21 @@
       if (json) json.value = JSON.stringify(cart.map(({ variant_id, quantity }) => ({ variant_id, quantity })));
       const submit = $('[data-pos-submit]', root);
       if (submit) submit.disabled = !cart.length || !canComplete;
+      cartDock?.classList.toggle('has-items', cart.length > 0);
+      if (activeProduct) renderModalOptions();
       window.lucide?.createIcons({ attrs: { 'stroke-width': 1.8 } });
     }
 
-    function add(button) {
+    function addItem(product, variant, quantity) {
       const cart = read();
-      const variantId = Number(button.dataset.variantId);
-      const stock = button.dataset.stock === '' ? null : Number(button.dataset.stock);
+      const variantId = Number(variant.id);
+      const stock = variant.stock_quantity === null ? null : Number(variant.stock_quantity);
       const limit = stock === null ? 10 : Math.min(10, stock);
       const existing = cart.find((item) => Number(item.variant_id) === variantId);
-      if (existing) existing.quantity = Math.min(limit, Number(existing.quantity) + 1);
-      else cart.push({ variant_id: variantId, product_name: button.dataset.productName, variant_label: button.dataset.variantLabel, price: Number(button.dataset.price), stock_quantity: stock, quantity: 1 });
+      if (existing) existing.quantity = Math.min(limit, Number(existing.quantity) + Number(quantity));
+      else cart.push({ variant_id: variantId, product_name: product.name, variant_label: variant.label, price: Number(variant.effective_price_cents), stock_quantity: stock, quantity: Math.min(limit, Number(quantity)) });
       write(cart);
-      if (window.matchMedia('(max-width: 680px)').matches) {
-        $('[data-pos-form]', root)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
+      closeProductModal();
     }
 
     function change(variantId, delta) {
@@ -275,6 +294,102 @@
       const limit = item.stock_quantity === null ? 10 : Math.min(10, Number(item.stock_quantity));
       item.quantity = Math.min(limit, Number(item.quantity) + delta);
       write(cart.filter((entry) => entry.quantity > 0));
+    }
+
+    function selectedVariant() {
+      return activeProduct?.variants?.find((variant) => Number(variant.id) === Number(selectedVariantId)) || activeProduct?.variants?.[0] || null;
+    }
+
+    function variantLimit(variant) {
+      if (!variant) return 1;
+      return variant.stock_quantity === null ? 10 : Math.max(1, Math.min(10, Number(variant.stock_quantity)));
+    }
+
+    function renderModalOptions() {
+      if (!activeProduct || !modal) return;
+      const cart = read();
+      const variantsNode = $('[data-pos-modal-variants]', modal);
+      if (variantsNode) variantsNode.innerHTML = activeProduct.variants.map((variant) => {
+        const selected = Number(variant.id) === Number(selectedVariantId);
+        const stock = variant.stock_quantity === null ? 'Stock not tracked · Available' : `${Number(variant.stock_quantity)} in stock`;
+        const stockClass = variant.stock_quantity !== null && Number(variant.stock_quantity) <= 5 ? ' low' : '';
+        const inCart = cart.find((item) => Number(item.variant_id) === Number(variant.id));
+        const detail = [variant.flavors, variant.sku ? `SKU ${variant.sku}` : ''].filter(Boolean).join(' · ');
+        const regularPrice = Number(variant.price_cents);
+        const salePrice = variant.sale_price_cents === null ? null : Number(variant.sale_price_cents);
+        return `<button type="button" class="${selected ? 'selected' : ''}" data-pos-modal-variant="${Number(variant.id)}" aria-selected="${selected}">
+          <span class="pos-modal-variant-check"><i data-lucide="${selected ? 'check' : 'circle'}"></i></span>
+          <span class="pos-modal-variant-copy"><strong>${escapeHtml(variant.label)}</strong>${detail ? `<small>${escapeHtml(detail)}</small>` : ''}<small class="pos-modal-stock${stockClass}">${escapeHtml(stock)}${inCart ? ` · ${Number(inCart.quantity)} in cart` : ''}</small></span>
+          <span class="pos-modal-price">${salePrice !== null ? `<del>${money(regularPrice)}</del>` : ''}<strong>${money(Number(variant.effective_price_cents))}</strong></span>
+        </button>`;
+      }).join('');
+      updateModalFooter();
+      window.lucide?.createIcons({ attrs: { 'stroke-width': 1.8 } });
+    }
+
+    function updateModalFooter() {
+      const variant = selectedVariant();
+      if (!variant || !modal) return;
+      modalQuantity = Math.max(1, Math.min(variantLimit(variant), Number(modalQuantity) || 1));
+      const quantityNode = $('[data-pos-modal-quantity]', modal);
+      const totalNode = $('[data-pos-modal-add-total]', modal);
+      const addLabel = $('[data-pos-modal-add] span', modal);
+      const minus = $('[data-pos-modal-minus]', modal);
+      const plus = $('[data-pos-modal-plus]', modal);
+      if (quantityNode) quantityNode.textContent = String(modalQuantity);
+      if (totalNode) totalNode.textContent = money(Number(variant.effective_price_cents) * modalQuantity);
+      if (addLabel) addLabel.textContent = modalQuantity === 1 ? 'Add to cart' : `Add ${modalQuantity} to cart`;
+      if (minus) minus.disabled = modalQuantity <= 1;
+      if (plus) plus.disabled = modalQuantity >= variantLimit(variant);
+    }
+
+    function openProductModal(productId, trigger) {
+      const product = products.get(Number(productId));
+      if (!product || !modal) return;
+      activeProduct = product;
+      lastProductTrigger = trigger;
+      const saved = modalSelections.get(Number(product.id));
+      selectedVariantId = Number(saved?.variantId || product.variants[0]?.id);
+      modalQuantity = Number(saved?.quantity || 1);
+      const imageNode = $('[data-pos-modal-image]', modal);
+      if (imageNode) imageNode.innerHTML = product.image_url ? `<img src="${escapeHtml(product.image_url)}" alt="">` : '<span class="pos-image-fallback"><i data-lucide="package-open"></i></span>';
+      const values = {
+        '[data-pos-modal-brand]': product.brand || product.category_name,
+        '[data-pos-modal-title]': product.name,
+        '[data-pos-modal-meta]': [product.category_name, product.strain_type].filter(Boolean).join(' · '),
+        '[data-pos-modal-potency]': product.potency || '',
+      };
+      Object.entries(values).forEach(([selector, value]) => { const node = $(selector, modal); if (node) node.textContent = value; });
+      const potencyNode = $('[data-pos-modal-potency]', modal);
+      if (potencyNode) potencyNode.hidden = !product.potency;
+      renderModalOptions();
+      clearTimeout(modalCloseTimer);
+      modal.hidden = false;
+      requestAnimationFrame(() => modal.classList.add('open'));
+      document.body.classList.add('pos-modal-open');
+      $('[data-pos-modal-close]', modal)?.focus({ preventScroll: true });
+    }
+
+    function closeProductModal() {
+      if (!modal || modal.hidden) return;
+      if (activeProduct) modalSelections.set(Number(activeProduct.id), { variantId: selectedVariantId, quantity: modalQuantity });
+      modal.classList.remove('open');
+      document.body.classList.remove('pos-modal-open');
+      modalCloseTimer = setTimeout(() => { modal.hidden = true; }, 180);
+      lastProductTrigger?.focus({ preventScroll: true });
+    }
+
+    function openPosCart() {
+      cartPanel?.classList.add('open');
+      document.body.classList.add('pos-cart-open');
+      cartDock?.setAttribute('aria-expanded', 'true');
+      $('[data-pos-cart-close]', cartPanel)?.focus({ preventScroll: true });
+    }
+
+    function closePosCart() {
+      cartPanel?.classList.remove('open');
+      document.body.classList.remove('pos-cart-open');
+      cartDock?.setAttribute('aria-expanded', 'false');
     }
 
     function filterProducts() {
@@ -293,12 +408,19 @@
     }
 
     root.addEventListener('click', (event) => {
-      const addButton = event.target.closest('[data-pos-add]');
+      const productButton = event.target.closest('[data-pos-open-product]');
       const plus = event.target.closest('[data-pos-plus]');
       const minus = event.target.closest('[data-pos-minus]');
       const clear = event.target.closest('[data-pos-clear]');
       const category = event.target.closest('[data-pos-category]');
-      if (addButton) add(addButton);
+      const modalVariant = event.target.closest('[data-pos-modal-variant]');
+      const modalMinus = event.target.closest('[data-pos-modal-minus]');
+      const modalPlus = event.target.closest('[data-pos-modal-plus]');
+      const modalAdd = event.target.closest('[data-pos-modal-add]');
+      const modalClose = event.target.closest('[data-pos-modal-close]');
+      const cartOpen = event.target.closest('[data-pos-cart-open]');
+      const cartClose = event.target.closest('[data-pos-cart-close]');
+      if (productButton) openProductModal(productButton.dataset.posOpenProduct, productButton);
       if (plus) change(plus.dataset.posPlus, 1);
       if (minus) change(minus.dataset.posMinus, -1);
       if (clear) write([]);
@@ -306,6 +428,20 @@
         $$('[data-pos-category]', root).forEach((button) => button.classList.toggle('active', button === category));
         filterProducts();
       }
+      if (modalVariant) {
+        selectedVariantId = Number(modalVariant.dataset.posModalVariant);
+        modalQuantity = 1;
+        renderModalOptions();
+      }
+      if (modalMinus) { modalQuantity -= 1; updateModalFooter(); }
+      if (modalPlus) { modalQuantity += 1; updateModalFooter(); }
+      if (modalAdd) {
+        const variant = selectedVariant();
+        if (activeProduct && variant) addItem(activeProduct, variant, modalQuantity);
+      }
+      if (modalClose || event.target === modal) closeProductModal();
+      if (cartOpen) openPosCart();
+      if (cartClose) closePosCart();
     });
     $('[data-pos-search]', root)?.addEventListener('input', filterProducts);
     discountInput?.addEventListener('input', render);
@@ -314,6 +450,14 @@
         event.preventDefault();
         alert('Add at least one product before completing the sale.');
       }
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') return;
+      if (modal && !modal.hidden) closeProductModal();
+      else closePosCart();
+    });
+    window.addEventListener('resize', () => {
+      if (window.matchMedia('(min-width: 821px) and (orientation: landscape)').matches) closePosCart();
     });
     filterProducts();
     render();
