@@ -1,0 +1,1 @@
+ALTER TABLE orders ADD COLUMN inventory_released INTEGER NOT NULL DEFAULT 0;

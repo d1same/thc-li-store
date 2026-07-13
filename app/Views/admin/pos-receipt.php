@@ -1,0 +1,12 @@
+<section class="pos-receipt-shell">
+  <div class="pos-receipt-actions"><a class="button button-secondary" href="<?= url('admin/pos') ?>"><i data-lucide="arrow-left"></i>New sale</a><?php if (setting('pos_print_receipt_enabled',true)): ?><button class="button button-primary" type="button" onclick="window.print()"><i data-lucide="printer"></i>Print receipt</button><?php endif; ?><?php if (can('orders.view')): ?><a class="button button-secondary" href="<?= url('admin/orders/' . $order['id']) ?>"><i data-lucide="receipt-text"></i>Order details</a><?php endif; ?></div>
+  <article class="pos-receipt admin-panel">
+    <div class="receipt-brand"><img src="<?= asset('brand/thc-li-wordmark-v2.png') ?>" alt="<?= e(setting('store_name')) ?>"><span>In-store receipt</span></div>
+    <div class="receipt-number"><span><?= e($order['order_number']) ?></span><small><?= e(date('M j, Y · g:i A', strtotime($order['created_at']))) ?></small></div>
+    <div class="receipt-items"><?php foreach ($items as $item): ?><div><span><strong><?= e($item['product_name']) ?></strong><small><?= e($item['variant_label']) ?> × <?= (int) $item['quantity'] ?></small></span><b><?= money((int) $item['line_total_cents']) ?></b></div><?php endforeach; ?></div>
+    <div class="receipt-breakdown"><div><span>Subtotal</span><strong><?= money((int) $order['subtotal_cents']) ?></strong></div><?php if ((int) $order['discount_cents'] > 0): ?><div><span><?= e($order['discount_label'] ?: 'Discount') ?></span><strong>−<?= money((int) $order['discount_cents']) ?></strong></div><?php endif; ?><?php if ((int) $order['tax_cents'] > 0): ?><div><span>Tax</span><strong><?= money((int) $order['tax_cents']) ?></strong></div><?php endif; ?><div class="receipt-total"><span>Total</span><strong><?= money((int) $order['total_cents']) ?></strong></div></div>
+    <dl class="receipt-meta"><div><dt>Payment</dt><dd><?= $order['payment_method'] === 'cash' ? 'Cash' : 'External card terminal' ?></dd></div><div><dt>Customer</dt><dd><?= e($order['customer_name']) ?></dd></div><div><dt>Staff</dt><dd><?= e($order['created_by_name'] ?: 'Owner') ?></dd></div><?php if ($order['customer_email']): ?><div><dt>Email receipt</dt><dd><?= $order['receipt_email_sent'] ? 'Sent to ' . e($order['customer_email']) : 'Not sent' ?></dd></div><?php endif; ?></dl>
+    <p class="receipt-warning"><?= e(setting('required_warning')) ?></p>
+  </article>
+</section>
+<script>sessionStorage.removeItem('thcli_pos_cart_v1');</script>

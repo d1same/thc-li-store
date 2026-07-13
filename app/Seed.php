@@ -25,6 +25,15 @@ final class Seed
             'pay_at_pickup_enabled' => ['1', 'bool'],
             'manual_prepaid_enabled' => ['1', 'bool'],
             'online_payment_enabled' => ['0', 'bool'],
+            'pos_enabled' => ['1', 'bool'],
+            'pos_cash_enabled' => ['1', 'bool'],
+            'pos_external_card_enabled' => ['1', 'bool'],
+            'pos_tax_enabled' => ['0', 'bool'],
+            'pos_tax_rate' => ['0', 'string'],
+            'pos_print_receipt_enabled' => ['1', 'bool'],
+            'pos_email_receipt_enabled' => ['1', 'bool'],
+            'pos_manual_discount_enabled' => ['0', 'bool'],
+            'pos_max_discount_percent' => ['20', 'int'],
             'pickup_minimum_cents' => ['0', 'int'],
             'delivery_minimum_cents' => ['12500', 'int'],
             'extended_delivery_minimum_cents' => ['25000', 'int'],
@@ -53,11 +62,16 @@ final class Seed
             }
         }
 
-        if ((int) $pdo->query('SELECT COUNT(*) FROM promotions')->fetchColumn() === 0) {
-            $stmt = $pdo->prepare('INSERT INTO promotions (title, description, active, position) VALUES (?, ?, 1, ?)');
-            $stmt->execute(['Happy Hour', 'Tuesdays and Thursdays from 12 PM to 1 PM. Eligible orders save 20%.', 10]);
-            $stmt->execute(['Next-day delivery', 'Schedule eligible orders for the next day and save 10%.', 20]);
-            $stmt->execute(['Limited release', '710 Close Friends Thumbprints - 2g bucket, limited availability.', 30]);
+        $promotionSeedInitialized = (bool) $pdo->query("SELECT 1 FROM settings WHERE key='seed_promotions_initialized'")->fetchColumn();
+        if (!$promotionSeedInitialized) {
+            if ((int) $pdo->query('SELECT COUNT(*) FROM promotions')->fetchColumn() === 0) {
+                $stmt = $pdo->prepare('INSERT INTO promotions (title, description, active, position) VALUES (?, ?, 1, ?)');
+                $stmt->execute(['Happy Hour', 'Tuesdays and Thursdays from 12 PM to 1 PM. Eligible orders save 20%.', 10]);
+                $stmt->execute(['Next-day delivery', 'Schedule eligible orders for the next day and save 10%.', 20]);
+                $stmt->execute(['Limited release', '710 Close Friends Thumbprints - 2g bucket, limited availability.', 30]);
+            }
+            $stmt = $pdo->prepare("INSERT OR IGNORE INTO settings (key,value,type) VALUES ('seed_promotions_initialized','1','bool')");
+            $stmt->execute();
         }
 
         if ((int) $pdo->query('SELECT COUNT(*) FROM products')->fetchColumn() > 0) {

@@ -56,7 +56,8 @@ final class Store
         }
         $sql = 'SELECT p.*, c.name AS category_name, c.slug AS category_slug,
                     MIN(COALESCE(v.sale_price_cents, v.price_cents)) AS from_price,
-                    COUNT(v.id) AS variant_count
+                    COUNT(v.id) AS variant_count,
+                    SUM(CASE WHEN v.stock_status != \'sold_out\' AND (v.stock_quantity IS NULL OR v.stock_quantity > 0) THEN 1 ELSE 0 END) AS available_variant_count
                 FROM products p
                 JOIN categories c ON c.id = p.category_id
                 JOIN product_variants v ON v.product_id = p.id
@@ -78,5 +79,46 @@ final class Store
     {
         return Database::all("SELECT * FROM promotions WHERE active=1 AND (starts_at IS NULL OR starts_at <= CURRENT_TIMESTAMP) AND (ends_at IS NULL OR ends_at >= CURRENT_TIMESTAMP) ORDER BY position");
     }
-}
 
+    public static function posCatalog(): array
+    {
+        $rows = Database::all(
+            "SELECT p.id product_id,p.name product_name,p.brand,p.image_path,p.strain_type,p.potency,
+                    c.name category_name,c.slug category_slug,
+                    v.id variant_id,v.label variant_label,v.sku,v.price_cents,v.sale_price_cents,v.flavors,v.stock_status,v.stock_quantity
+             FROM products p
+             JOIN categories c ON c.id=p.category_id
+             JOIN product_variants v ON v.product_id=p.id
+             WHERE p.status='active' AND v.stock_status!='sold_out' AND (v.stock_quantity IS NULL OR v.stock_quantity>0)
+             ORDER BY c.position,p.name,v.position,v.price_cents"
+        );
+        $products = [];
+        foreach ($rows as $row) {
+            $productId = (int) $row['product_id'];
+            if (!isset($products[$productId])) {
+                $products[$productId] = [
+                    'id' => $productId,
+                    'name' => $row['product_name'],
+                    'brand' => $row['brand'],
+                    'image_path' => $row['image_path'],
+                    'strain_type' => $row['strain_type'],
+                    'potency' => $row['potency'],
+                    'category_name' => $row['category_name'],
+                    'category_slug' => $row['category_slug'],
+                    'variants' => [],
+                ];
+            }
+            $products[$productId]['variants'][] = [
+                'id' => (int) $row['variant_id'],
+                'label' => $row['variant_label'],
+                'sku' => $row['sku'],
+                'price_cents' => (int) $row['price_cents'],
+                'sale_price_cents' => $row['sale_price_cents'] === null ? null : (int) $row['sale_price_cents'],
+                'flavors' => $row['flavors'],
+                'stock_status' => $row['stock_status'],
+                'stock_quantity' => $row['stock_quantity'] === null ? null : (int) $row['stock_quantity'],
+            ];
+        }
+        return array_values($products);
+    }
+}

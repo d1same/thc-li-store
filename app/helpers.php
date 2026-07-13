@@ -83,6 +83,11 @@ function is_admin(): bool
     return Auth::isStaff();
 }
 
+function can(string $permission): bool
+{
+    return Auth::can($permission);
+}
+
 function render(string $view, array $data = []): void
 {
     extract($data, EXTR_SKIP);

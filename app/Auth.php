@@ -6,6 +6,24 @@ namespace App;
 final class Auth
 {
     private static ?array $cachedUser = null;
+    private static array $permissionCache = [];
+
+    public static function permissionDefinitions(): array
+    {
+        return [
+            'pos.access' => 'Open the POS register',
+            'pos.complete' => 'Complete in-store sales',
+            'pos.discount' => 'Apply manual POS discounts',
+            'orders.view' => 'View customer and POS orders',
+            'orders.manage' => 'Update, complete or cancel orders',
+            'products.view' => 'View products and inventory',
+            'products.create' => 'Add products and options',
+            'products.edit' => 'Edit products, prices and stock',
+            'products.archive' => 'Archive products from the menu',
+            'promotions.manage' => 'Create, disable or delete promotions',
+            'settings.manage' => 'Change store and POS settings',
+        ];
+    }
 
     public static function user(): ?array
     {
@@ -67,6 +85,7 @@ final class Auth
         }
         session_destroy();
         self::$cachedUser = null;
+        self::$permissionCache = [];
     }
 
     public static function isStaff(): bool
@@ -93,5 +112,46 @@ final class Auth
             exit('You do not have permission to view this page.');
         }
         return $user;
+    }
+
+    public static function can(string $permission, ?array $user = null): bool
+    {
+        $user ??= self::user();
+        if (!$user || !in_array($user['role'], ['staff', 'manager', 'owner'], true)) {
+            return false;
+        }
+        if ($user['role'] === 'owner') {
+            return true;
+        }
+        $userId = (int) $user['id'];
+        if (!array_key_exists($userId, self::$permissionCache)) {
+            self::$permissionCache[$userId] = array_fill_keys(array_column(Database::all(
+                'SELECT permission FROM staff_permissions WHERE user_id=? AND allowed=1',
+                [$userId]
+            ), 'permission'), true);
+        }
+        return isset(self::$permissionCache[$userId][$permission]);
+    }
+
+    public static function requirePermission(string $permission): array
+    {
+        $user = self::requireStaff();
+        if (!self::can($permission, $user)) {
+            http_response_code(403);
+            exit('You do not have permission to perform this action.');
+        }
+        return $user;
+    }
+
+    public static function syncPermissions(int $userId, array $permissions): void
+    {
+        $allowed = array_intersect(array_keys(self::permissionDefinitions()), $permissions);
+        $pdo = Database::pdo();
+        $pdo->prepare('DELETE FROM staff_permissions WHERE user_id=?')->execute([$userId]);
+        $stmt = $pdo->prepare('INSERT INTO staff_permissions (user_id,permission,allowed,updated_at) VALUES (?,?,1,CURRENT_TIMESTAMP)');
+        foreach ($allowed as $permission) {
+            $stmt->execute([$userId, $permission]);
+        }
+        unset(self::$permissionCache[$userId]);
     }
 }

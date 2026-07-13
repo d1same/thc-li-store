@@ -19,6 +19,30 @@ A mobile-first PHP 8.3+ and SQLite storefront for a single local shop. It includ
 
 The SQLite database, runtime configuration, uploaded photos, and backups must not be committed to Git or overwritten during deployment.
 
+## Inventory
+
+- Inventory is tracked per product option, so each size, flavor, or package can have its own quantity.
+- In **Owner desk → Products**, leave **Quantity left** blank for an untracked option or enter a whole number to track it.
+- Tracked status is automatic: 6 or more is in stock, 1–5 is low stock, and 0 is sold out.
+- Placing an order reserves stock immediately. Cancelling the order restores those units exactly once.
+- The Products table and owner dashboard show low-stock and sold-out options. Checkout rechecks inventory to prevent overselling.
+
+## Point of sale
+
+- Open **Owner desk → Point of sale** on a tablet or browser for walk-in checkout.
+- POS sales use the same products, variants, inventory, customer accounts, orders, and audit history as the storefront.
+- Cash and external card-terminal payments are supported. The application records the payment result but never collects or stores card numbers.
+- POS tax, printed receipts, emailed receipts, and manual discounts can each be enabled or disabled under **Owner desk → Settings**.
+- Customer details are optional. ID/age verification is required before completing every in-store sale.
+- Cancelling a completed POS order restores tracked inventory exactly once.
+
+## Staff permissions
+
+- The owner always retains full access.
+- In **Owner desk → Staff**, create staff or manager logins and choose their permissions with checkboxes.
+- POS access, sale approval, manual discounts, order management, product creation/editing/archiving, promotions, and settings are independently controlled.
+- Product removal is implemented as archiving so historical orders and receipts remain intact.
+
 ## Local preview
 
 ```powershell

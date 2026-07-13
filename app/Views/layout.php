@@ -12,15 +12,15 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="<?= asset('app.css') ?>">
   <script>window.SHOP={base:<?= json_encode(rtrim(url(''), '/')) ?>,csrf:<?= json_encode(csrf_token()) ?>};</script>
-  <script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
   <script defer src="<?= asset('app.js') ?>"></script>
+  <script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
 </head>
 <body class="<?= $adminArea ? 'admin-body' : '' ?>">
   <?php if (!$adminArea): ?>
     <div class="announcement"><span class="status-dot"></span><?= e(setting('announcement')) ?></div>
     <header class="site-header">
       <a class="brand" href="<?= url('') ?>" aria-label="<?= e(setting('store_name')) ?> home">
-        <img class="brand-wordmark" src="<?= asset('brand/thc-li-wordmark.png') ?>" alt="<?= e(setting('store_name')) ?>">
+        <img class="brand-wordmark" src="<?= asset('brand/thc-li-wordmark-v2.png') ?>" alt="<?= e(setting('store_name')) ?>">
       </a>
       <nav class="desktop-nav" aria-label="Main navigation">
         <a href="<?= url('menu') ?>">Menu</a>
@@ -39,14 +39,15 @@
     </nav>
   <?php else: ?>
     <header class="admin-header">
-      <a class="brand brand-light" href="<?= url('admin') ?>"><img class="brand-icon" src="<?= asset('brand/thc-li-icon.webp') ?>" alt=""><span>Owner desk</span></a>
+      <a class="brand brand-light" href="<?= url('admin') ?>"><img class="brand-icon" src="<?= asset('brand/thc-li-icon-v2.png') ?>" alt=""><span>Owner desk</span></a>
       <button class="icon-button admin-menu-button" data-admin-menu aria-label="Open admin navigation"><i data-lucide="menu"></i></button>
       <nav class="admin-nav" data-admin-nav>
         <a href="<?= url('admin') ?>"><i data-lucide="layout-dashboard"></i>Overview</a>
-        <a href="<?= url('admin/orders') ?>"><i data-lucide="package-check"></i>Orders</a>
-        <a href="<?= url('admin/products') ?>"><i data-lucide="package-open"></i>Products</a>
-        <a href="<?= url('admin/promotions') ?>"><i data-lucide="badge-percent"></i>Promotions</a>
-        <a href="<?= url('admin/settings') ?>"><i data-lucide="sliders-horizontal"></i>Settings</a>
+        <?php if (can('pos.access')): ?><a href="<?= url('admin/pos') ?>"><i data-lucide="tablet-smartphone"></i>Point of sale</a><?php endif; ?>
+        <?php if (can('orders.view')): ?><a href="<?= url('admin/orders') ?>"><i data-lucide="package-check"></i>Orders</a><?php endif; ?>
+        <?php if (can('products.view')): ?><a href="<?= url('admin/products') ?>"><i data-lucide="package-open"></i>Products</a><?php endif; ?>
+        <?php if (can('promotions.manage')): ?><a href="<?= url('admin/promotions') ?>"><i data-lucide="badge-percent"></i>Promotions</a><?php endif; ?>
+        <?php if (can('settings.manage')): ?><a href="<?= url('admin/settings') ?>"><i data-lucide="sliders-horizontal"></i>Settings</a><?php endif; ?>
         <?php if (($user['role'] ?? '') === 'owner'): ?><a href="<?= url('admin/staff') ?>"><i data-lucide="users-round"></i>Staff</a><?php endif; ?>
         <a href="<?= url('') ?>"><i data-lucide="store"></i>View shop</a>
         <form method="post" action="<?= url('logout') ?>"><?= csrf_field() ?><button type="submit"><i data-lucide="log-out"></i>Sign out</button></form>
@@ -62,7 +63,7 @@
 
   <?php if (!$adminArea): ?>
     <footer class="site-footer">
-      <div><a class="brand brand-light" href="<?= url('') ?>"><img class="brand-wordmark brand-wordmark-light" src="<?= asset('brand/thc-li-wordmark.png') ?>" alt="<?= e(setting('store_name')) ?>"></a><p><?= e(setting('store_tagline')) ?></p></div>
+      <div><a class="brand brand-light" href="<?= url('') ?>"><img class="brand-wordmark brand-wordmark-light" src="<?= asset('brand/thc-li-wordmark-v2.png') ?>" alt="<?= e(setting('store_name')) ?>"></a><p><?= e(setting('store_tagline')) ?></p></div>
       <div><strong>Shop</strong><a href="<?= url('menu') ?>">Full menu</a><a href="<?= url('account') ?>">Order history</a><a href="<?= url('checkout') ?>">Checkout</a></div>
       <div><strong>Store</strong><span><?= e(setting('hours')) ?></span><span><?= e(setting('service_areas')) ?></span><span><?= e(setting('store_phone')) ?></span></div>
       <p class="compliance-note"><?= e(setting('required_warning')) ?><br>License: <?= e(setting('license_number')) ?></p>
@@ -78,7 +79,7 @@
     </div>
 
     <div class="age-gate" data-age-gate hidden>
-      <div class="age-card"><img class="age-logo" src="<?= asset('brand/thc-li-wordmark.png') ?>" alt="<?= e(setting('store_name')) ?>"><span class="eyebrow">Welcome to <?= e(setting('store_name')) ?></span><h2>Are you 21 or older?</h2><p>This menu is intended only for adults of legal purchasing age. Identification is required when an order is fulfilled.</p><button class="button button-primary button-wide" data-age-yes>Yes, I am 21+</button><a href="https://www.google.com" class="button button-quiet">No, take me away</a></div>
+      <div class="age-card"><img class="age-logo" src="<?= asset('brand/thc-li-wordmark-v2.png') ?>" alt="<?= e(setting('store_name')) ?>"><span class="eyebrow">Welcome to <?= e(setting('store_name')) ?></span><h2>Are you 21 or older?</h2><p>This menu is intended only for adults of legal purchasing age. Identification is required when an order is fulfilled.</p><button class="button button-primary button-wide" data-age-yes>Yes, I am 21+</button><a href="https://www.google.com" class="button button-quiet">No, take me away</a></div>
     </div>
   <?php endif; ?>
 </body>
