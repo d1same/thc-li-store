@@ -1,0 +1,7 @@
+<section class="page-intro container"><span class="eyebrow">Live catalog</span><h1>Shop the menu</h1><p>Search by product, brand or flavor. Availability is confirmed after checkout.</p></section>
+<section class="menu-tools container">
+  <form class="menu-search" action="<?= url('menu') ?>" method="get"><i data-lucide="search"></i><input type="search" name="q" value="<?= e($search) ?>" placeholder="Search products, brands or flavors"><button class="button button-primary" type="submit">Search</button></form>
+  <div class="category-chips"><a class="chip <?= !$activeCategory?'active':'' ?>" href="<?= url('menu') ?>">All</a><?php foreach($categories as $category): ?><a class="chip <?= $activeCategory===$category['slug']?'active':'' ?>" href="<?= url('menu?category='.$category['slug']) ?>"><?= e($category['name']) ?></a><?php endforeach; ?></div>
+</section>
+<section class="container product-section menu-products"><div class="results-heading"><span><strong><?= count($products) ?></strong> products</span><?php if($search): ?><a href="<?= url('menu') ?>">Clear search</a><?php endif; ?></div><div class="product-grid"><?php foreach($products as $product) require APP_ROOT.'/app/Views/partials/product-card.php'; ?></div><?php if(!$products): ?><div class="empty-state"><i data-lucide="search-x"></i><h2>No products matched</h2><p>Try a broader search or browse all categories.</p><a class="button button-primary" href="<?= url('menu') ?>">View the full menu</a></div><?php endif; ?></section>
+
