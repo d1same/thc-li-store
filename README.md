@@ -11,7 +11,7 @@ A mobile-first PHP 8.3+ and SQLite storefront for a single local shop. It includ
 
 ## First run
 
-1. Point the domain document root to `public/`, or deploy the contents of `public/` to `public_html/` and place `app/` plus `database/` in a private sibling directory.
+1. For the simplest cPanel preview, clone the repository directly into the domain or subdomain document root. The root front controller securely serves the application from `public/` automatically. Pointing the document root directly to `public/` remains supported for production.
 2. Confirm `storage/` and `public/uploads/` are writable by PHP.
 3. Visit `/setup` and create the first owner account.
 4. Open **Owner desk → Settings** and configure the license, service areas, pickup location, delivery minimums, hours, and approved payment methods.
@@ -44,6 +44,17 @@ C:\laragon\etc\apache2\sites-enabled\dave-local.conf
 It points directly to this repository's `public/` directory and sets `APP_BASE=/dave`, so `.htaccess`, clean routes, SQLite, and uploads are tested using the same Apache behavior expected on cPanel.
 
 ## cPanel deployment
+
+### Simple subdomain preview
+
+1. Create a subdomain and leave its document root at the repository folder, such as `/home/USER/thcli`.
+2. Clone this repository into that folder with cPanel Git Version Control.
+3. Copy `.env.example` to `.env`, add a unique `APP_KEY`, and set the production URL.
+4. Make `storage/` and `public/uploads/` writable, then visit `/setup`.
+
+No file moving or `/public` document-root change is required for this preview setup.
+
+### Separate production release
 
 The included `.cpanel.yml` is a starting point. Replace `CPANEL_USER` with the actual cPanel username and confirm the target paths before enabling deployment. Keep the repository checkout separate from the live application and persistent data.
 
