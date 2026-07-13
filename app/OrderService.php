@@ -124,11 +124,23 @@ final class OrderService
         $pdo->beginTransaction();
         try {
             self::reserveInventory($pdo, $inventory);
+            $customerId = CustomerService::capture([
+                'user_id' => $user['id'] ?? null,
+                'name' => $payload['customer_name'],
+                'email' => $payload['customer_email'],
+                'phone' => $payload['customer_phone'],
+                'address1' => $payload['address1'] ?? '',
+                'address2' => $payload['address2'] ?? '',
+                'city' => $payload['city'] ?? '',
+                'state' => $payload['state'] ?? 'NY',
+                'postal_code' => $payload['postal_code'] ?? '',
+                'marketing_opt_in' => $payload['marketing_opt_in'] ?? 0,
+            ], $pdo);
             $stmt = $pdo->prepare(
-                'INSERT INTO orders (order_number,user_id,status,fulfillment,payment_method,payment_status,subtotal_cents,fee_cents,tax_cents,total_cents,customer_name,customer_email,customer_phone,address1,address2,city,state,postal_code,requested_time,customer_notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                'INSERT INTO orders (order_number,user_id,customer_id,status,fulfillment,payment_method,payment_status,subtotal_cents,fee_cents,tax_cents,total_cents,customer_name,customer_email,customer_phone,address1,address2,city,state,postal_code,requested_time,customer_notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             );
             $stmt->execute([
-                $number, $user['id'] ?? null, 'awaiting_confirmation', $fulfillment, $payment,
+                $number, $user['id'] ?? null, $customerId, 'awaiting_confirmation', $fulfillment, $payment,
                 $payment === 'pay_at_pickup' ? 'due' : 'pending', $subtotal, $fee, $tax, $total,
                 trim($payload['customer_name']), strtolower(trim($payload['customer_email'])), trim($payload['customer_phone']),
                 trim((string) ($payload['address1'] ?? '')), trim((string) ($payload['address2'] ?? '')),
@@ -247,9 +259,13 @@ final class OrderService
         $tax = (int) round(($subtotal - $discount) * ($taxRate / 100));
         $total = $subtotal - $discount + $tax;
 
-        $customerName = trim((string) ($payload['customer_name'] ?? '')) ?: 'Walk-in customer';
-        $customerEmail = strtolower(trim((string) ($payload['customer_email'] ?? '')));
-        $customerPhone = trim((string) ($payload['customer_phone'] ?? ''));
+        $skipCustomer = ($payload['skip_customer'] ?? '') === '1';
+        $customerName = $skipCustomer ? 'Walk-in customer' : trim((string) ($payload['customer_name'] ?? ''));
+        $customerEmail = $skipCustomer ? '' : strtolower(trim((string) ($payload['customer_email'] ?? '')));
+        $customerPhone = $skipCustomer ? '' : trim((string) ($payload['customer_phone'] ?? ''));
+        if (!$skipCustomer && ($customerName === '' || ($customerEmail === '' && CustomerService::phoneKey($customerPhone) === null))) {
+            throw new RuntimeException('Add the customer name and either a phone number or email, or choose anonymous walk-in.');
+        }
         if ($customerEmail !== '' && !filter_var($customerEmail, FILTER_VALIDATE_EMAIL)) {
             throw new RuntimeException('Enter a valid receipt email or leave it blank.');
         }
@@ -263,11 +279,19 @@ final class OrderService
         $pdo->beginTransaction();
         try {
             self::reserveInventory($pdo, $inventory);
+            $customerId = $skipCustomer ? null : CustomerService::capture([
+                'customer_id' => Auth::can('customers.view', $staff) ? ($payload['customer_id'] ?? null) : null,
+                'user_id' => $customer['id'] ?? null,
+                'name' => $customerName,
+                'email' => $customerEmail,
+                'phone' => $customerPhone,
+                'marketing_opt_in' => $payload['marketing_opt_in'] ?? 0,
+            ], $pdo);
             $stmt = $pdo->prepare(
-                'INSERT INTO orders (order_number,user_id,status,fulfillment,payment_method,payment_status,subtotal_cents,discount_cents,fee_cents,tax_cents,total_cents,customer_name,customer_email,customer_phone,requested_time,customer_notes,staff_notes,order_source,created_by_user_id,age_verified,discount_label) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                'INSERT INTO orders (order_number,user_id,customer_id,status,fulfillment,payment_method,payment_status,subtotal_cents,discount_cents,fee_cents,tax_cents,total_cents,customer_name,customer_email,customer_phone,requested_time,customer_notes,staff_notes,order_source,created_by_user_id,age_verified,discount_label) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             );
             $stmt->execute([
-                $number, $customer['id'] ?? null, 'completed', 'pickup', $payment, 'paid',
+                $number, $customer['id'] ?? null, $customerId, 'completed', 'pickup', $payment, 'paid',
                 $subtotal, $discount, 0, $tax, $total, $customerName, $customerEmail, $customerPhone,
                 'In store', trim((string) ($payload['customer_notes'] ?? '')), 'Completed at POS',
                 'pos', (int) $staff['id'], 1,

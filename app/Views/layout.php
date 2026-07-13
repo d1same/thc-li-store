@@ -49,6 +49,8 @@
         <a href="<?= url('admin') ?>" title="Overview"><i data-lucide="layout-dashboard"></i><span>Overview</span></a>
         <?php if (can('pos.access')): ?><a href="<?= url('admin/pos') ?>" title="Point of sale"><i data-lucide="tablet-smartphone"></i><span>Point of sale</span></a><?php endif; ?>
         <?php if (can('orders.view')): ?><a href="<?= url('admin/orders') ?>" title="Orders"><i data-lucide="package-check"></i><span>Orders</span></a><?php endif; ?>
+        <?php if (can('reports.view')): ?><a href="<?= url('admin/reports') ?>" title="Sales & Reports"><i data-lucide="chart-no-axes-combined"></i><span>Sales & Reports</span></a><?php endif; ?>
+        <?php if (can('customers.view')): ?><a href="<?= url('admin/customers') ?>" title="Customers"><i data-lucide="contact-round"></i><span>Customers</span></a><?php endif; ?>
         <?php if (can('products.view')): ?><a href="<?= url('admin/products') ?>" title="Products"><i data-lucide="package-open"></i><span>Products</span></a><?php endif; ?>
         <?php if (can('promotions.manage')): ?><a href="<?= url('admin/promotions') ?>" title="Promotions"><i data-lucide="badge-percent"></i><span>Promotions</span></a><?php endif; ?>
         <?php if (can('settings.manage')): ?><a href="<?= url('admin/settings') ?>" title="Settings"><i data-lucide="sliders-horizontal"></i><span>Settings</span></a><?php endif; ?>

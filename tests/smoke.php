@@ -10,7 +10,9 @@ require __DIR__ . '/../app/bootstrap.php';
 
 use App\Database;
 use App\Auth;
+use App\CustomerService;
 use App\OrderService;
+use App\ReportingService;
 use App\Seed;
 use App\Store;
 
@@ -94,6 +96,7 @@ $posOrderResult = OrderService::createPos([
     'customer_name' => '',
     'customer_email' => '',
     'customer_phone' => '',
+    'skip_customer' => '1',
     'age_verified' => '1',
 ], $posStaff);
 $posOrder = Database::one('SELECT * FROM orders WHERE id=?', [$posOrderResult['id']]);
@@ -110,9 +113,21 @@ $discountedPosResult = OrderService::createPos([
     'discount_percent' => '10',
     'customer_name' => 'Receipt Customer',
     'customer_email' => 'receipt@example.test',
+    'customer_phone' => '6315550166',
+    'marketing_opt_in' => '1',
     'age_verified' => '1',
 ], $posStaff);
 $discountedPosOrder = Database::one('SELECT * FROM orders WHERE id=?', [$discountedPosResult['id']]);
+$receiptCustomer = Database::one('SELECT * FROM customer_profiles WHERE id=?', [(int) $discountedPosOrder['customer_id']]);
+CustomerService::capture([
+    'customer_id' => (int) $discountedPosOrder['customer_id'],
+    'name' => 'Receipt Customer',
+    'email' => 'owner@example.test',
+    'phone' => '6315550100',
+]);
+$receiptAfterConflict = Database::one('SELECT * FROM customer_profiles WHERE id=?', [(int) $discountedPosOrder['customer_id']]);
+CustomerService::syncDirectory();
+$salesReport = ReportingService::report(['range' => '30d']);
 $imageRows = Database::all("SELECT image_path FROM products WHERE image_path IS NOT NULL AND image_path != ''");
 $imageFiles = array_filter($imageRows, static fn(array $row): bool => is_file(APP_ROOT . '/public/' . $row['image_path']));
 $initialPromotionCount = (int) $pdo->query('SELECT COUNT(*) FROM promotions')->fetchColumn();
@@ -137,12 +152,18 @@ $checks = [
     'stock restored exactly once' => !$releasedSecond && (int) $restoredAgain['stock_quantity'] === 6,
     'overselling blocked' => $oversellBlocked && (int) $afterOversell['stock_quantity'] === 1,
     'POS migration applied' => in_array('order_source', array_column(Database::all('PRAGMA table_info(orders)'), 'name'), true),
+    'customer reporting migration applied' => in_array('customer_id', array_column(Database::all('PRAGMA table_info(orders)'), 'name'), true),
     'staff POS permission enforced' => Auth::can('pos.access', $posStaff) && !Auth::can('products.edit', $posStaff),
     'POS works while online ordering paused' => $posOrder !== null && $posOrder['order_source'] === 'pos',
     'POS anonymous cash sale completed' => $posOrder['status'] === 'completed' && $posOrder['payment_status'] === 'paid' && $posOrder['payment_method'] === 'cash' && $posOrder['customer_name'] === 'Walk-in customer',
     'POS tax snapshot calculated' => (int) $posOrder['subtotal_cents'] === 2000 && (int) $posOrder['tax_cents'] === 178 && (int) $posOrder['total_cents'] === 2178,
     'POS stock reserved and void restored' => (int) $posReserved['stock_quantity'] === 6 && $posReleased && (int) $posRestored['stock_quantity'] === 8,
     'POS external terminal and discount calculated' => $discountedPosOrder['payment_method'] === 'external_card' && (int) $discountedPosOrder['discount_cents'] === 100 && (int) $discountedPosOrder['tax_cents'] === 80 && (int) $discountedPosOrder['total_cents'] === 980,
+    'identified POS sale linked to customer' => (int) $discountedPosOrder['customer_id'] > 0 && $receiptCustomer !== null && $receiptCustomer['email_key'] === 'receipt@example.test',
+    'marketing consent preserved' => (int) $receiptCustomer['marketing_opt_in'] === 1,
+    'conflicting contact data cannot overwrite another customer' => $receiptAfterConflict['email'] === 'receipt@example.test' && $receiptAfterConflict['phone'] === '6315550166',
+    'anonymous POS sale stays out of client list' => $posOrder['customer_id'] === null,
+    'sales report aggregates paid history' => (int) $salesReport['kpis']['orders'] >= 1 && (int) $salesReport['kpis']['revenue'] >= 980 && $salesReport['top_products'] !== [],
     'pickup enabled' => Store::setting('pickup_enabled') === true,
     'online payment safely disabled' => Store::setting('online_payment_enabled') === false,
     'seed images available' => count($imageFiles) >= 40,

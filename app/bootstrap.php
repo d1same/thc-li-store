@@ -48,3 +48,9 @@ date_default_timezone_set('America/New_York');
 
 \App\Database::boot();
 \App\Migration::run();
+$configuredTimezone = (string) \App\Store::setting('report_timezone', 'America/New_York');
+try {
+    date_default_timezone_set((new DateTimeZone($configuredTimezone))->getName());
+} catch (Throwable) {
+    date_default_timezone_set('America/New_York');
+}

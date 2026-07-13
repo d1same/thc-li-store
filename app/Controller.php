@@ -183,6 +183,10 @@ final class Controller
         $staff = Auth::requireStaff();
         $canViewOrders = Auth::can('orders.view', $staff);
         $canViewProducts = Auth::can('products.view', $staff);
+        $canViewReports = Auth::can('reports.view', $staff);
+        if ($canViewReports || Auth::can('customers.view', $staff)) {
+            CustomerService::syncDirectory(500);
+        }
         render('admin/dashboard', [
             'title' => $staff['role'] === 'owner' ? 'Owner dashboard' : 'Team dashboard',
             'counts' => [
@@ -192,7 +196,204 @@ final class Controller
                 'low_stock' => $canViewProducts ? (int) Database::pdo()->query("SELECT COUNT(*) FROM product_variants WHERE stock_status='low_stock'")->fetchColumn() : 0,
             ],
             'orders' => $canViewOrders ? Database::all('SELECT * FROM orders ORDER BY created_at DESC LIMIT 8') : [],
+            'sales' => $canViewReports ? ReportingService::report(['range' => 'today'])['kpis'] : null,
         ]);
+    }
+
+    public static function adminReports(): void
+    {
+        Auth::requirePermission('reports.view');
+        CustomerService::syncDirectory(2000);
+        render('admin/reports', [
+            'title' => 'Sales & Reports',
+            'report' => ReportingService::report($_GET),
+        ]);
+    }
+
+    public static function adminCustomers(): void
+    {
+        Auth::requirePermission('customers.view');
+        CustomerService::syncDirectory(2000);
+        $search = mb_substr(trim((string) ($_GET['q'] ?? '')), 0, 100);
+        $status = in_array($_GET['status'] ?? '', ['active', 'inactive'], true) ? (string) $_GET['status'] : '';
+        $marketing = ($_GET['marketing'] ?? '') === '1';
+        $requestedPerPage = (int) ($_GET['per_page'] ?? 20);
+        $perPage = in_array($requestedPerPage, [20, 50, 100], true) ? $requestedPerPage : 20;
+        $page = max(1, (int) ($_GET['page'] ?? 1));
+        $where = ['1=1'];
+        $params = [];
+        if ($search !== '') {
+            $where[] = '(c.name LIKE ? OR c.email LIKE ? OR c.phone LIKE ? OR c.city LIKE ? OR c.postal_code LIKE ?)';
+            $term = '%' . $search . '%';
+            array_push($params, $term, $term, $term, $term, $term);
+        }
+        if ($status !== '') {
+            $where[] = 'c.status=?';
+            $params[] = $status;
+        }
+        if ($marketing) {
+            $where[] = 'c.marketing_opt_in=1';
+        }
+        $whereSql = implode(' AND ', $where);
+        $count = (int) (Database::one("SELECT COUNT(*) count FROM customer_profiles c WHERE {$whereSql}", $params)['count'] ?? 0);
+        $totalPages = max(1, (int) ceil($count / $perPage));
+        $page = min($page, $totalPages);
+        $offset = ($page - 1) * $perPage;
+        $customers = Database::all(
+            "SELECT c.*,
+                    COUNT(o.id) order_count,
+                    COALESCE(SUM(CASE WHEN o.status='completed' AND o.payment_status='paid' THEN o.total_cents ELSE 0 END),0) lifetime_value_cents,
+                    MAX(o.created_at) last_order_at,
+                    SUM(CASE WHEN o.order_source='pos' THEN 1 ELSE 0 END) pos_orders,
+                    SUM(CASE WHEN o.order_source='online' THEN 1 ELSE 0 END) online_orders
+             FROM customer_profiles c LEFT JOIN orders o ON o.customer_id=c.id
+             WHERE {$whereSql}
+             GROUP BY c.id
+             ORDER BY COALESCE(MAX(o.created_at),c.last_seen_at) DESC,c.name
+             LIMIT {$perPage} OFFSET {$offset}",
+            $params
+        );
+        $summary = Database::one(
+            "SELECT COUNT(*) customers,
+                    SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) active,
+                    SUM(CASE WHEN marketing_opt_in=1 THEN 1 ELSE 0 END) marketing
+             FROM customer_profiles"
+        ) ?? ['customers' => 0, 'active' => 0, 'marketing' => 0];
+        $summary['lifetime_value_cents'] = (int) (Database::one(
+            "SELECT COALESCE(SUM(total_cents),0) total FROM orders WHERE status='completed' AND payment_status='paid' AND customer_id IS NOT NULL"
+        )['total'] ?? 0);
+        render('admin/customers', [
+            'title' => 'Customers',
+            'customers' => $customers,
+            'summary' => $summary,
+            'filters' => ['q' => $search, 'status' => $status, 'marketing' => $marketing, 'per_page' => $perPage],
+            'pagination' => ['page' => $page, 'pages' => $totalPages, 'total' => $count],
+        ]);
+    }
+
+    public static function adminCustomerSearch(): void
+    {
+        $staff = Auth::requirePermission('pos.access');
+        header('Content-Type: application/json; charset=utf-8');
+        if (!Auth::can('customers.view', $staff)) {
+            http_response_code(403);
+            echo json_encode(['customers' => []]);
+            return;
+        }
+        CustomerService::syncDirectory(300);
+        $search = mb_substr(trim((string) ($_GET['q'] ?? '')), 0, 80);
+        if (mb_strlen($search) < 2) {
+            echo json_encode(['customers' => []]);
+            return;
+        }
+        $term = '%' . $search . '%';
+        $customers = Database::all(
+            "SELECT id,name,email,phone,marketing_opt_in,address1,city,state,postal_code
+             FROM customer_profiles
+             WHERE status='active' AND (name LIKE ? OR email LIKE ? OR phone LIKE ?)
+             ORDER BY last_seen_at DESC LIMIT 8",
+            [$term, $term, $term]
+        );
+        echo json_encode(['customers' => $customers], JSON_UNESCAPED_SLASHES);
+    }
+
+    public static function adminCustomer(string $id): void
+    {
+        Auth::requirePermission('customers.view');
+        CustomerService::syncDirectory(2000);
+        $customerId = (int) $id;
+        $customer = Database::one(
+            "SELECT c.*,COUNT(o.id) order_count,
+                    COALESCE(SUM(CASE WHEN o.status='completed' AND o.payment_status='paid' THEN o.total_cents ELSE 0 END),0) lifetime_value_cents,
+                    COALESCE(AVG(CASE WHEN o.status='completed' AND o.payment_status='paid' THEN o.total_cents END),0) average_order_cents,
+                    MAX(o.created_at) last_order_at
+             FROM customer_profiles c LEFT JOIN orders o ON o.customer_id=c.id WHERE c.id=? GROUP BY c.id",
+            [$customerId]
+        );
+        if (!$customer) {
+            http_response_code(404);
+            render('errors/404', ['title' => 'Customer not found']);
+            return;
+        }
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            Auth::requirePermission('customers.edit');
+            verify_csrf();
+            try {
+                CustomerService::update($customerId, $_POST);
+                self::audit('customer.updated', 'customer', (string) $customerId, ['status' => $_POST['status'] ?? 'active']);
+                flash('success', 'Customer profile updated. Historical orders were not changed.');
+            } catch (RuntimeException $error) {
+                flash('error', $error->getMessage());
+            }
+            redirect('admin/customers/' . $customerId);
+        }
+        $orders = Database::all('SELECT * FROM orders WHERE customer_id=? ORDER BY created_at DESC', [$customerId]);
+        $products = Database::all(
+            "SELECT oi.product_name,oi.variant_label,SUM(oi.quantity) units,SUM(oi.line_total_cents) revenue
+             FROM order_items oi JOIN orders o ON o.id=oi.order_id
+             WHERE o.customer_id=? AND o.status='completed' AND o.payment_status='paid'
+             GROUP BY oi.product_name,oi.variant_label ORDER BY units DESC,revenue DESC LIMIT 8",
+            [$customerId]
+        );
+        $addresses = Database::all(
+            "SELECT address1,address2,city,state,postal_code,MAX(created_at) last_used
+             FROM orders WHERE customer_id=? AND TRIM(address1)!=''
+             GROUP BY address1,address2,city,state,postal_code ORDER BY last_used DESC",
+            [$customerId]
+        );
+        render('admin/customer', [
+            'title' => $customer['name'],
+            'customer' => $customer,
+            'orders' => $orders,
+            'products' => $products,
+            'addresses' => $addresses,
+        ]);
+    }
+
+    public static function adminCustomersExport(): void
+    {
+        Auth::requirePermission('customers.export');
+        verify_csrf();
+        CustomerService::syncDirectory(5000);
+        $scope = ($_POST['scope'] ?? '') === 'marketing' ? 'marketing' : 'all';
+        $where = $scope === 'marketing' ? 'WHERE c.marketing_opt_in=1 AND c.status=\'active\'' : '';
+        $customers = Database::all(
+            "SELECT c.*,
+                    COUNT(o.id) order_count,
+                    COALESCE(SUM(CASE WHEN o.status='completed' AND o.payment_status='paid' THEN o.total_cents ELSE 0 END),0) lifetime_value_cents,
+                    MAX(o.created_at) last_order_at
+             FROM customer_profiles c LEFT JOIN orders o ON o.customer_id=c.id {$where}
+             GROUP BY c.id ORDER BY c.name"
+        );
+        self::audit('customers.exported', 'customer_export', $scope, ['count' => count($customers)]);
+        $filename = 'customers-' . $scope . '-' . date('Y-m-d-His') . '.csv';
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Cache-Control: no-store, private');
+        $output = fopen('php://output', 'wb');
+        if ($output === false) {
+            throw new RuntimeException('Unable to create customer export.');
+        }
+        fwrite($output, "\xEF\xBB\xBF");
+        fputcsv($output, ['Name','Email','Phone','Address 1','Address 2','City','State','ZIP','Status','Marketing opt-in','Orders','Lifetime spend','First seen','Last seen','Last order']);
+        foreach ($customers as $customer) {
+            fputcsv($output, [
+                self::safeCsvCell($customer['name']), self::safeCsvCell($customer['email']), self::safeCsvCell($customer['phone']),
+                self::safeCsvCell($customer['address1']), self::safeCsvCell($customer['address2']), self::safeCsvCell($customer['city']),
+                self::safeCsvCell($customer['state']), self::safeCsvCell($customer['postal_code']), $customer['status'],
+                (int) $customer['marketing_opt_in'] === 1 ? 'Yes' : 'No', (int) $customer['order_count'],
+                number_format((int) $customer['lifetime_value_cents'] / 100, 2, '.', ''),
+                $customer['first_seen_at'], $customer['last_seen_at'], $customer['last_order_at'],
+            ]);
+        }
+        fclose($output);
+        exit;
+    }
+
+    private static function safeCsvCell(mixed $value): string
+    {
+        $cell = (string) $value;
+        return preg_match('/^[\s]*[=+\-@]/u', $cell) === 1 ? "'" . $cell : $cell;
     }
 
     public static function adminProducts(): void
@@ -492,6 +693,13 @@ final class Controller
             $taxRate = max(0, min(30, (float) ($_POST['pos_tax_rate'] ?? 0)));
             $_POST['pos_tax_rate'] = rtrim(rtrim(number_format($taxRate, 3, '.', ''), '0'), '.');
             $_POST['pos_max_discount_percent'] = max(0, min(100, (int) ($_POST['pos_max_discount_percent'] ?? 20)));
+            $timezone = trim((string) ($_POST['report_timezone'] ?? 'America/New_York'));
+            try {
+                $_POST['report_timezone'] = (new \DateTimeZone($timezone))->getName();
+            } catch (\Throwable) {
+                $_POST['report_timezone'] = 'America/New_York';
+            }
+            $_POST['business_city'] = mb_substr(trim((string) ($_POST['business_city'] ?? '')), 0, 100);
             foreach ($schema as $key => $type) {
                 $value = $type === 'bool' ? isset($_POST[$key]) : ($_POST[$key] ?? '');
                 if ($type === 'int' && str_ends_with($key, '_cents')) {
@@ -613,10 +821,10 @@ final class Controller
     private static function settingsSchema(): array
     {
         return [
-            'store_name'=>'string','store_tagline'=>'string','store_phone'=>'string','store_email'=>'string','store_status'=>'string','announcement'=>'string','hours'=>'string','license_number'=>'string','required_warning'=>'string',
+            'store_name'=>'string','store_tagline'=>'string','store_phone'=>'string','store_email'=>'string','store_status'=>'string','announcement'=>'string','hours'=>'string','license_number'=>'string','required_warning'=>'string','business_city'=>'string','report_timezone'=>'string',
             'ordering_enabled'=>'bool','pickup_enabled'=>'bool','delivery_enabled'=>'bool','guest_checkout_enabled'=>'bool','registration_enabled'=>'bool','manual_confirmation'=>'bool','same_day_enabled'=>'bool','scheduled_enabled'=>'bool',
             'pay_at_pickup_enabled'=>'bool','manual_prepaid_enabled'=>'bool','pickup_minimum_cents'=>'int','delivery_minimum_cents'=>'int','extended_delivery_minimum_cents'=>'int','delivery_fee_cents'=>'int','service_areas'=>'string','extended_areas'=>'string','pickup_address'=>'string',
-            'pos_enabled'=>'bool','pos_cash_enabled'=>'bool','pos_external_card_enabled'=>'bool','pos_tax_enabled'=>'bool','pos_tax_rate'=>'string','pos_print_receipt_enabled'=>'bool','pos_email_receipt_enabled'=>'bool','pos_manual_discount_enabled'=>'bool','pos_max_discount_percent'=>'int',
+            'pos_enabled'=>'bool','pos_cash_enabled'=>'bool','pos_external_card_enabled'=>'bool','pos_tax_enabled'=>'bool','pos_tax_rate'=>'string','pos_print_receipt_enabled'=>'bool','pos_email_receipt_enabled'=>'bool','pos_manual_discount_enabled'=>'bool','pos_max_discount_percent'=>'int','customer_capture_enabled'=>'bool','marketing_opt_in_enabled'=>'bool',
         ];
     }
 

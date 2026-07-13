@@ -123,6 +123,10 @@
     setAdminSidebar(document.documentElement.classList.contains('admin-nav-collapsed'), false);
     adminCollapse.addEventListener('click', () => setAdminSidebar(!document.documentElement.classList.contains('admin-nav-collapsed')));
   }
+  const reportRange = $('[data-report-range]');
+  const syncReportRange = () => $$('[data-report-custom]').forEach((field) => { field.hidden = reportRange?.value !== 'custom'; });
+  reportRange?.addEventListener('change', syncReportRange);
+  syncReportRange();
 
   const ageGate = $('[data-age-gate]');
   if (ageGate && localStorage.getItem('thcli_age_verified') !== 'yes') {
@@ -231,6 +235,12 @@
     const modal = $('[data-pos-modal]', root);
     const cartPanel = $('[data-pos-cart-panel]', root);
     const cartDock = $('[data-pos-cart-open]', root);
+    const customerSearch = $('[data-pos-customer-search]', root);
+    const customerResults = $('[data-pos-customer-results]', root);
+    const customerIdInput = $('[data-pos-customer-id]', root);
+    const skipCustomer = $('[data-pos-skip-customer]', root);
+    let customerSearchTimer = null;
+    let customerSearchRequest = 0;
     let catalog = [];
     try { catalog = JSON.parse(catalogNode?.textContent || '[]'); } catch { catalog = []; }
     const products = new Map(catalog.map((product) => [Number(product.id), product]));
@@ -406,6 +416,60 @@
       cartDock?.setAttribute('aria-expanded', 'false');
     }
 
+    function setCustomerSkipped(skipped) {
+      const fields = $('[data-pos-customer-fields]', root);
+      $$('input,textarea', fields || root).forEach((field) => {
+        if (!fields?.contains(field)) return;
+        field.disabled = skipped;
+      });
+      if (customerSearch) customerSearch.disabled = skipped;
+      if (customerIdInput) customerIdInput.disabled = skipped;
+      $('[data-pos-customer-capture]', root)?.classList.toggle('anonymous', skipped);
+      if (skipped && customerResults) customerResults.hidden = true;
+    }
+
+    function chooseCustomer(customer) {
+      if (customerIdInput) customerIdInput.value = String(customer.id || '');
+      const values = {
+        '[name="customer_name"]': customer.name || '',
+        '[name="customer_phone"]': customer.phone || '',
+        '[name="customer_email"]': customer.email || '',
+      };
+      Object.entries(values).forEach(([selector, value]) => { const input = $(selector, root); if (input) input.value = value; });
+      const marketing = $('[name="marketing_opt_in"]', root);
+      if (marketing) marketing.checked = Number(customer.marketing_opt_in) === 1;
+      if (customerSearch) customerSearch.value = customer.name || '';
+      if (customerResults) customerResults.hidden = true;
+      if (skipCustomer) skipCustomer.checked = false;
+      setCustomerSkipped(false);
+    }
+
+    async function searchCustomers() {
+      if (!customerSearch || !customerResults) return;
+      const query = customerSearch.value.trim();
+      const request = ++customerSearchRequest;
+      if (query.length < 2) {
+        customerResults.hidden = true;
+        customerResults.innerHTML = '';
+        return;
+      }
+      customerResults.hidden = false;
+      customerResults.innerHTML = '<span class="pos-customer-loading">Searching customers…</span>';
+      try {
+        const response = await fetch(`${window.SHOP.base}/admin/customers/search?q=${encodeURIComponent(query)}`, { headers: { Accept: 'application/json' } });
+        if (!response.ok) throw new Error('Customer search failed');
+        const payload = await response.json();
+        if (request !== customerSearchRequest) return;
+        customerResults.innerHTML = payload.customers?.length ? payload.customers.map((customer) => `
+          <button type="button" data-pos-customer-choice="${escapeHtml(encodeURIComponent(JSON.stringify(customer)))}">
+            <span><strong>${escapeHtml(customer.name)}</strong><small>${escapeHtml(customer.phone || customer.email || 'Customer record')}</small></span><i data-lucide="arrow-up-right"></i>
+          </button>`).join('') : '<span class="pos-customer-loading">No matching customer. Enter the new details below.</span>';
+        window.lucide?.createIcons({ attrs: { 'stroke-width': 1.8 } });
+      } catch {
+        if (request === customerSearchRequest) customerResults.innerHTML = '<span class="pos-customer-loading">Customer search is unavailable. New details can still be saved.</span>';
+      }
+    }
+
     function filterProducts() {
       const query = ($('[data-pos-search]', root)?.value || '').trim().toLowerCase();
       const active = $('[data-pos-category].active', root)?.dataset.posCategory || '';
@@ -434,6 +498,7 @@
       const modalClose = event.target.closest('[data-pos-modal-close]');
       const cartOpen = event.target.closest('[data-pos-cart-open]');
       const cartClose = event.target.closest('[data-pos-cart-close]');
+      const customerChoice = event.target.closest('[data-pos-customer-choice]');
       if (productButton) openProductModal(productButton.dataset.posOpenProduct, productButton);
       if (plus) change(plus.dataset.posPlus, 1);
       if (minus) change(minus.dataset.posMinus, -1);
@@ -456,9 +521,20 @@
       if (modalClose || event.target === modal) closeProductModal();
       if (cartOpen) openPosCart();
       if (cartClose) closePosCart();
+      if (customerChoice) {
+        try { chooseCustomer(JSON.parse(decodeURIComponent(customerChoice.dataset.posCustomerChoice))); } catch {}
+      }
     });
     $('[data-pos-search]', root)?.addEventListener('input', filterProducts);
     discountInput?.addEventListener('input', render);
+    customerSearch?.addEventListener('input', () => {
+      clearTimeout(customerSearchTimer);
+      customerSearchTimer = setTimeout(searchCustomers, 220);
+    });
+    skipCustomer?.addEventListener('change', () => setCustomerSkipped(skipCustomer.checked));
+    $$('[data-pos-customer-fields] input', root).forEach((input) => input.addEventListener('input', () => {
+      if (customerIdInput && !input.matches('[name="marketing_opt_in"]')) customerIdInput.value = '';
+    }));
     form?.addEventListener('submit', (event) => {
       if (!read().length) {
         event.preventDefault();
@@ -474,6 +550,7 @@
       if (window.matchMedia('(min-width: 821px) and (orientation: landscape)').matches) closePosCart();
     });
     filterProducts();
+    setCustomerSkipped(skipCustomer?.checked || false);
     render();
   }
 

@@ -33,14 +33,24 @@ The SQLite database, runtime configuration, uploaded photos, and backups must no
 - POS sales use the same products, variants, inventory, customer accounts, orders, and audit history as the storefront.
 - Cash and external card-terminal payments are supported. The application records the payment result but never collects or stores card numbers.
 - POS tax, printed receipts, emailed receipts, and manual discounts can each be enabled or disabled under **Owner desk → Settings**.
-- Customer details are optional. ID/age verification is required before completing every in-store sale.
+- Customer capture is prioritized at checkout: staff can find an existing client or add a name plus phone/email, while an explicit anonymous walk-in option remains available.
+- Anonymous sales still count in revenue and sales reports but do not create customer records. ID/age verification is required before completing every in-store sale.
 - Cancelling a completed POS order restores tracked inventory exactly once.
+
+## Customers and sales reports
+
+- **Owner desk → Customers** combines registered accounts, online guests, and identified POS clients in one searchable directory.
+- Customer profiles include contact details, address, status, marketing consent, private staff notes, lifetime sales, favorite products, and complete order history.
+- Owners can export all customers or only marketing-approved contacts as a CSV download. Exports are streamed securely and recorded in the audit log.
+- **Owner desk → Sales & Reports** includes revenue, paid orders, units sold, average sale, new customers, tax, discounts, top products/options/categories, payment and source breakdowns, staff sales, and busiest times.
+- Revenue includes only paid, completed orders. Cancelled orders remain permanently visible in order history but are excluded from revenue.
+- Report date ranges use the business city and timezone configured in **Owner desk → Settings**. Existing timestamps are never rewritten when the timezone changes.
 
 ## Staff permissions
 
 - The owner always retains full access.
 - In **Owner desk → Staff**, create staff or manager logins and choose their permissions with checkboxes.
-- POS access, sale approval, manual discounts, order management, product creation/editing/archiving, promotions, and settings are independently controlled.
+- POS access, sale approval, manual discounts, reports, customer viewing/editing/export, order management, product creation/editing/archiving, promotions, and settings are independently controlled.
 - Product removal is implemented as archiving so historical orders and receipts remain intact.
 
 ## Local preview
