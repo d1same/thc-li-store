@@ -49,6 +49,7 @@ The SQLite database, runtime configuration, uploaded photos, and backups must no
 ## Receipts, customer imports, and campaigns
 
 - Receipt and order-confirmation emails enter a private queue. The order page shows queued, sent, or failed status, and authorized staff can resend a receipt.
+- New online-order alerts are sent to `orders@thc-li.com` with a secure Admin link; full delivery details remain in the authenticated order screen.
 - Run the queue every five minutes from cPanel Cron: `*/5 * * * * /usr/local/bin/php /home/CPANEL_USER/thcli/scripts/email-worker.php` (confirm the PHP path first).
 - Use `receipts@thc-li.com` for receipts/order confirmations and `updates@thc-li.com` for approved product campaigns. Configure their sender names and reply-to addresses together with the physical business address, license, and SPF/DKIM/DMARC verification under **Owner desk → Settings** before enabling email.
 - Customer imports accept CSV files exported from Excel. Download the template, upload for an encrypted preview, and confirm after reviewing matches. The importer never replaces order history or existing private notes.

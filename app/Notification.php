@@ -33,12 +33,14 @@ final class Notification
                 'unique_key' => 'order-confirmation:' . $orderId,
             ]);
         }
-        $ownerEmail = trim((string) Store::setting('store_email', ''));
+        $ownerEmail = trim((string) Store::setting('order_notification_email', Store::setting('store_email', '')));
         if ($ownerEmail !== '') {
+            $adminUrl = EmailService::appUrl('admin/orders/' . $orderId);
             EmailService::queue([
                 'message_type' => 'owner_notification', 'recipient_email' => $ownerEmail,
                 'subject' => 'New order - ' . $order['order_number'],
-                'body_text' => $message . "\nCustomer: {$order['customer_name']}\nPhone: {$order['customer_phone']}",
+                'body_text' => $message . "\nCustomer: {$order['customer_name']}\nPhone: {$order['customer_phone']}\nOpen securely: {$adminUrl}",
+                'body_html' => EmailService::emailShell('New online order', '<p><strong>' . EmailService::html((string) $order['order_number']) . '</strong><br>' . EmailService::html(ucfirst((string) $order['fulfillment'])) . ' · ' . EmailService::html(money((int) $order['total_cents'])) . '</p><p>Customer: ' . EmailService::html((string) $order['customer_name']) . '<br>Phone: ' . EmailService::html((string) $order['customer_phone']) . '</p><p><a href="' . EmailService::html($adminUrl) . '">Open order securely in Admin</a></p>'),
                 'order_id' => $orderId, 'unique_key' => 'owner-order:' . $orderId,
             ]);
         }

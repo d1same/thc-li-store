@@ -18,6 +18,7 @@ use App\Seed;
 use App\Store;
 use App\EmailService;
 use App\CustomerImportService;
+use App\Notification;
 
 $pdo = Database::pdo();
 if ((int) $pdo->query("SELECT COUNT(*) FROM users WHERE role='owner'")->fetchColumn() === 0) {
@@ -113,6 +114,7 @@ Store::setSetting('pos_max_discount_percent', 20, 'int');
 Store::setSetting('email_enabled', true, 'bool');
 Store::setSetting('email_from_address', 'receipts@example.test');
 Store::setSetting('email_from_name', 'Test Shop');
+Store::setSetting('order_notification_email', 'owner-orders@example.test');
 $discountedPosResult = OrderService::createPos([
     'cart_json' => json_encode([['variant_id' => $posVariantId, 'quantity' => 1]]),
     'payment_method' => 'external_card',
@@ -155,6 +157,8 @@ Store::setSetting('marketing_campaigns_enabled', true, 'bool');
 Store::setSetting('marketing_physical_address', '123 Test Street, Huntington, NY 11743');
 Store::setSetting('license_number', 'TEST-LICENSE-001');
 $receiptBeforeWorker = Database::one('SELECT receipt_email_status FROM orders WHERE id=?', [$discountedPosResult['id']]);
+Notification::orderReceived(1);
+$ownerOrderNotification = Database::one("SELECT * FROM email_queue WHERE message_type='owner_notification' AND order_id=1");
 $workerResult = EmailService::processQueue(100);
 $receiptAfterWorker = Database::one('SELECT receipt_email_status,receipt_email_last_sent_at FROM orders WHERE id=?', [$discountedPosResult['id']]);
 $campaignId = CampaignService::createDraft([
@@ -218,6 +222,7 @@ $checks = [
     'deleted promotions stay deleted' => $promotionsRemainDeleted,
     'email security migration applied' => in_array('receipt_email_status', array_column(Database::all('PRAGMA table_info(orders)'), 'name'), true) && (int) $pdo->query("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('email_queue','email_campaigns','login_rate_limits')")->fetchColumn() === 3,
     'marketing sender separated from receipts' => Store::setting('email_from_address') === 'receipts@example.test' && Store::setting('marketing_from_address') === 'updates@thc-li.com',
+    'owner order notification uses dedicated inbox' => ($ownerOrderNotification['recipient_email'] ?? '') === 'owner-orders@example.test' && str_contains((string) ($ownerOrderNotification['body_text'] ?? ''), '/admin/orders/1'),
     'POS receipt queued before worker' => ($receiptBeforeWorker['receipt_email_status'] ?? '') === 'queued',
     'email worker records accepted delivery' => $workerResult['sent'] >= 1 && ($receiptAfterWorker['receipt_email_status'] ?? '') === 'sent' && !empty($receiptAfterWorker['receipt_email_last_sent_at']),
     'campaign requires approval and eligible consent' => $campaignRecipients >= 1 && ($campaignRow['status'] ?? '') === 'completed' && (int) $campaignRow['recipient_count'] === $campaignRecipients && $campaignWorkerResult['sent'] >= 1,

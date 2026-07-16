@@ -43,6 +43,7 @@ final class Seed
             'email_from_name' => ['THC LI', 'string'],
             'email_from_address' => ['receipts@thc-li.com', 'string'],
             'email_reply_to' => ['receipts@thc-li.com', 'string'],
+            'order_notification_email' => ['orders@thc-li.com', 'string'],
             'email_dns_verified' => ['0', 'bool'],
             'marketing_campaigns_enabled' => ['0', 'bool'],
             'marketing_from_name' => ['THC LI Updates', 'string'],
