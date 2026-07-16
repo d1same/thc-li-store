@@ -217,6 +217,7 @@ $checks = [
     'promotion seed initialized' => $promotionSeedInitialized,
     'deleted promotions stay deleted' => $promotionsRemainDeleted,
     'email security migration applied' => in_array('receipt_email_status', array_column(Database::all('PRAGMA table_info(orders)'), 'name'), true) && (int) $pdo->query("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('email_queue','email_campaigns','login_rate_limits')")->fetchColumn() === 3,
+    'marketing sender separated from receipts' => Store::setting('email_from_address') === 'receipts@example.test' && Store::setting('marketing_from_address') === 'updates@thc-li.com',
     'POS receipt queued before worker' => ($receiptBeforeWorker['receipt_email_status'] ?? '') === 'queued',
     'email worker records accepted delivery' => $workerResult['sent'] >= 1 && ($receiptAfterWorker['receipt_email_status'] ?? '') === 'sent' && !empty($receiptAfterWorker['receipt_email_last_sent_at']),
     'campaign requires approval and eligible consent' => $campaignRecipients >= 1 && ($campaignRow['status'] ?? '') === 'completed' && (int) $campaignRow['recipient_count'] === $campaignRecipients && $campaignWorkerResult['sent'] >= 1,

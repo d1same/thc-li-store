@@ -127,11 +127,11 @@ final class EmailService
     {
         $checks = [
             'email_enabled' => Store::setting('email_enabled', false) === true,
-            'from_address' => filter_var(Store::setting('email_from_address', ''), FILTER_VALIDATE_EMAIL) !== false,
         ];
         if ($marketing) {
             $license = trim((string) Store::setting('license_number', ''));
             $checks += [
+                'marketing_from_address' => filter_var(Store::setting('marketing_from_address', ''), FILTER_VALIDATE_EMAIL) !== false,
                 'campaigns_enabled' => Store::setting('marketing_campaigns_enabled', false) === true,
                 'physical_address' => trim((string) Store::setting('marketing_physical_address', '')) !== '',
                 'hopeline_disclosure' => trim((string) Store::setting('marketing_hopeline', '')) !== '',
@@ -139,6 +139,8 @@ final class EmailService
                 'dns_verified' => Store::setting('email_dns_verified', false) === true,
                 'app_key' => strlen((string) getenv('APP_KEY')) >= 32,
             ];
+        } else {
+            $checks['receipt_from_address'] = filter_var(Store::setting('email_from_address', ''), FILTER_VALIDATE_EMAIL) !== false;
         }
         return ['ready' => !in_array(false, $checks, true), 'checks' => $checks];
     }
@@ -192,15 +194,16 @@ final class EmailService
             throw new RuntimeException('Email sending is disabled in store settings.');
         }
         $to = strtolower(trim((string) $row['recipient_email']));
-        $from = strtolower(trim((string) Store::setting('email_from_address', '')));
+        $marketing = $row['message_type'] === 'campaign';
+        $from = strtolower(trim((string) Store::setting($marketing ? 'marketing_from_address' : 'email_from_address', '')));
         if (!filter_var($to, FILTER_VALIDATE_EMAIL) || !filter_var($from, FILTER_VALIDATE_EMAIL)) {
             throw new RuntimeException('A valid recipient and From address are required.');
         }
         if ((string) getenv('APP_ENV') === 'testing' || str_ends_with($to, '.test')) {
             return true;
         }
-        $fromName = self::headerValue((string) Store::setting('email_from_name', Store::setting('store_name', 'Local Shop')));
-        $replyTo = strtolower(trim((string) Store::setting('email_reply_to', $from)));
+        $fromName = self::headerValue((string) Store::setting($marketing ? 'marketing_from_name' : 'email_from_name', Store::setting('store_name', 'Local Shop')));
+        $replyTo = strtolower(trim((string) Store::setting($marketing ? 'marketing_reply_to' : 'email_reply_to', $from)));
         if (!filter_var($replyTo, FILTER_VALIDATE_EMAIL)) {
             $replyTo = $from;
         }
