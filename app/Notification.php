@@ -7,6 +7,9 @@ final class Notification
 {
     public static function orderReceived(int $orderId): void
     {
+        if (!EmailService::readiness(false)['ready']) {
+            return;
+        }
         $order = Database::one('SELECT * FROM orders WHERE id=?', [$orderId]);
         if (!$order) {
             return;
@@ -17,45 +20,39 @@ final class Notification
             "Estimated total: " . money((int) $order['total_cents']) . "\n" .
             "Fulfillment: " . ucfirst($order['fulfillment']) . "\n\n" .
             "The owner will confirm availability, timing, and payment before fulfillment.";
-        self::send((string) $order['customer_email'], $subject, $message);
+        if (Store::setting('email_order_confirmation_enabled', true)) {
+            EmailService::queue([
+                'message_type' => 'order_confirmation',
+                'recipient_email' => (string) $order['customer_email'],
+                'recipient_name' => (string) $order['customer_name'],
+                'subject' => $subject,
+                'body_text' => $message,
+                'body_html' => EmailService::emailShell('Order received', '<p>We received order request <strong>' . EmailService::html((string) $order['order_number']) . '</strong>.</p><p>Estimated total: <strong>' . EmailService::html(money((int) $order['total_cents'])) . '</strong><br>Fulfillment: ' . EmailService::html(ucfirst((string) $order['fulfillment'])) . '</p><p>The owner will confirm availability, timing, and payment before fulfillment.</p>'),
+                'customer_id' => $order['customer_id'] ?? null,
+                'order_id' => $orderId,
+                'unique_key' => 'order-confirmation:' . $orderId,
+            ]);
+        }
         $ownerEmail = trim((string) Store::setting('store_email', ''));
         if ($ownerEmail !== '') {
-            self::send($ownerEmail, 'New order - ' . $order['order_number'], $message . "\nCustomer: {$order['customer_name']}\nPhone: {$order['customer_phone']}");
+            EmailService::queue([
+                'message_type' => 'owner_notification', 'recipient_email' => $ownerEmail,
+                'subject' => 'New order - ' . $order['order_number'],
+                'body_text' => $message . "\nCustomer: {$order['customer_name']}\nPhone: {$order['customer_phone']}",
+                'order_id' => $orderId, 'unique_key' => 'owner-order:' . $orderId,
+            ]);
         }
     }
 
     public static function posReceipt(int $orderId): bool
     {
+        if (!EmailService::readiness(false)['ready']) {
+            return false;
+        }
         $order = Database::one('SELECT * FROM orders WHERE id=? AND order_source=?', [$orderId, 'pos']);
         if (!$order || trim((string) $order['customer_email']) === '') {
             return false;
         }
-        $items = Database::all('SELECT * FROM order_items WHERE order_id=? ORDER BY id', [$orderId]);
-        $lines = [];
-        foreach ($items as $item) {
-            $lines[] = $item['quantity'] . ' x ' . $item['product_name'] . ' (' . $item['variant_label'] . ') - ' . money((int) $item['line_total_cents']);
-        }
-        $message = Store::setting('store_name', 'Local Shop') . " receipt {$order['order_number']}\n\n" .
-            implode("\n", $lines) . "\n\n" .
-            'Subtotal: ' . money((int) $order['subtotal_cents']) . "\n" .
-            ((int) $order['discount_cents'] > 0 ? 'Discount: -' . money((int) $order['discount_cents']) . "\n" : '') .
-            ((int) $order['tax_cents'] > 0 ? 'Tax: ' . money((int) $order['tax_cents']) . "\n" : '') .
-            'Total: ' . money((int) $order['total_cents']) . "\n" .
-            'Payment: ' . ($order['payment_method'] === 'cash' ? 'Cash' : 'External card terminal') . "\n\n" .
-            (string) Store::setting('required_warning', 'For use only by persons 21 years of age and older.');
-        return self::send((string) $order['customer_email'], Store::setting('store_name', 'Local Shop') . ' receipt ' . $order['order_number'], $message);
-    }
-
-    private static function send(string $to, string $subject, string $message): bool
-    {
-        if (!filter_var($to, FILTER_VALIDATE_EMAIL) || str_ends_with($to, '.test')) {
-            return false;
-        }
-        $host = preg_replace('/[^a-z0-9.-]/i', '', (string) ($_SERVER['HTTP_HOST'] ?? 'localhost')) ?: 'localhost';
-        $headers = [
-            'Content-Type: text/plain; charset=UTF-8',
-            'From: Local Shop <no-reply@' . $host . '>',
-        ];
-        return @mail($to, $subject, $message, implode("\r\n", $headers));
+        return EmailService::queueReceipt($orderId, (string) $order['customer_email']) !== null;
     }
 }

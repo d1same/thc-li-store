@@ -135,9 +135,14 @@ final class OrderService
                 'state' => $payload['state'] ?? 'NY',
                 'postal_code' => $payload['postal_code'] ?? '',
                 'marketing_opt_in' => $payload['marketing_opt_in'] ?? 0,
+                'marketing_consent_source' => 'online checkout',
             ], $pdo);
+            if ($customerId) {
+                $pdo->prepare("UPDATE customer_profiles SET marketing_age_verified_at=CURRENT_TIMESTAMP,marketing_age_verified_source='online 21+ attestation' WHERE id=?")
+                    ->execute([$customerId]);
+            }
             $stmt = $pdo->prepare(
-                'INSERT INTO orders (order_number,user_id,customer_id,status,fulfillment,payment_method,payment_status,subtotal_cents,fee_cents,tax_cents,total_cents,customer_name,customer_email,customer_phone,address1,address2,city,state,postal_code,requested_time,customer_notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                'INSERT INTO orders (order_number,user_id,customer_id,status,fulfillment,payment_method,payment_status,subtotal_cents,fee_cents,tax_cents,total_cents,customer_name,customer_email,customer_phone,address1,address2,city,state,postal_code,requested_time,customer_notes,age_verified) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             );
             $stmt->execute([
                 $number, $user['id'] ?? null, $customerId, 'awaiting_confirmation', $fulfillment, $payment,
@@ -145,7 +150,7 @@ final class OrderService
                 trim($payload['customer_name']), strtolower(trim($payload['customer_email'])), trim($payload['customer_phone']),
                 trim((string) ($payload['address1'] ?? '')), trim((string) ($payload['address2'] ?? '')),
                 trim((string) ($payload['city'] ?? '')), 'NY', trim((string) ($payload['postal_code'] ?? '')),
-                trim((string) ($payload['requested_time'] ?? '')), trim((string) ($payload['customer_notes'] ?? '')),
+                trim((string) ($payload['requested_time'] ?? '')), trim((string) ($payload['customer_notes'] ?? '')), 1,
             ]);
             $orderId = (int) $pdo->lastInsertId();
             $itemStmt = $pdo->prepare('INSERT INTO order_items (order_id,product_id,variant_id,product_name,variant_label,unit_price_cents,quantity,line_total_cents) VALUES (?,?,?,?,?,?,?,?)');
@@ -286,7 +291,12 @@ final class OrderService
                 'email' => $customerEmail,
                 'phone' => $customerPhone,
                 'marketing_opt_in' => $payload['marketing_opt_in'] ?? 0,
+                'marketing_consent_source' => 'point of sale',
             ], $pdo);
+            if ($customerId) {
+                $pdo->prepare("UPDATE customer_profiles SET marketing_age_verified_at=CURRENT_TIMESTAMP,marketing_age_verified_source='POS ID check' WHERE id=?")
+                    ->execute([$customerId]);
+            }
             $stmt = $pdo->prepare(
                 'INSERT INTO orders (order_number,user_id,customer_id,status,fulfillment,payment_method,payment_status,subtotal_cents,discount_cents,fee_cents,tax_cents,total_cents,customer_name,customer_email,customer_phone,requested_time,customer_notes,staff_notes,order_source,created_by_user_id,age_verified,discount_label) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             );
@@ -310,8 +320,8 @@ final class OrderService
             throw $error;
         }
 
-        if ($customerEmail !== '' && Store::setting('pos_email_receipt_enabled', true) && Notification::posReceipt($orderId)) {
-            Database::execute('UPDATE orders SET receipt_email_sent=1 WHERE id=?', [$orderId]);
+        if ($customerEmail !== '' && Store::setting('pos_email_receipt_enabled', true)) {
+            Notification::posReceipt($orderId);
         }
         return ['id' => $orderId, 'number' => $number, 'total_cents' => $total];
     }

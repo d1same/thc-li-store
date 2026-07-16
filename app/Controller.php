@@ -158,6 +158,13 @@ final class Controller
         render('order-success', ['title' => 'Order received', 'order' => $order]);
     }
 
+    public static function unsubscribe(string $token): void
+    {
+        $confirmed = $_SERVER['REQUEST_METHOD'] === 'POST';
+        $customer = EmailService::unsubscribe($token, $confirmed);
+        render('unsubscribe', ['title' => 'Email preferences', 'valid' => $customer !== null, 'confirmed' => $confirmed && $customer !== null, 'token' => $token]);
+    }
+
     public static function setup(): void
     {
         if ((int) Database::pdo()->query("SELECT COUNT(*) FROM users WHERE role='owner'")->fetchColumn() > 0) {
@@ -388,6 +395,47 @@ final class Controller
         }
         fclose($output);
         exit;
+    }
+
+    public static function adminCustomersImport(): void
+    {
+        $user = Auth::requirePermission('customers.import');
+        $preview = null;
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            verify_csrf();
+            try {
+                $preview = CustomerImportService::preview($_FILES['customer_file'] ?? [], (int) $user['id']);
+                self::audit('customers.import.previewed', 'customer_import', (string) $preview['job_id'], ['rows' => $preview['total']]);
+            } catch (RuntimeException $error) {
+                flash('error', $error->getMessage());
+            }
+        }
+        render('admin/customer-import', ['title' => 'Import customers', 'preview' => $preview]);
+    }
+
+    public static function adminCustomersImportTemplate(): void
+    {
+        Auth::requirePermission('customers.import');
+        CustomerImportService::template();
+        exit;
+    }
+
+    public static function adminCustomersImportConfirm(): void
+    {
+        $user = Auth::requirePermission('customers.import'); verify_csrf();
+        try {
+            $result = CustomerImportService::confirm((int) $user['id']);
+            self::audit('customers.import.completed', 'customer_import', 'latest', $result);
+            flash('success', "Import complete: {$result['created']} created and {$result['updated']} matched/updated.");
+            redirect('admin/customers');
+        } catch (RuntimeException $error) { flash('error', $error->getMessage()); redirect('admin/customers/import'); }
+    }
+
+    public static function adminCustomersImportCancel(): void
+    {
+        $user = Auth::requirePermission('customers.import'); verify_csrf();
+        CustomerImportService::cancel((int) $user['id']);
+        flash('success', 'Import cancelled and the encrypted preview was removed.'); redirect('admin/customers');
     }
 
     private static function safeCsvCell(mixed $value): string
@@ -713,6 +761,74 @@ final class Controller
         render('admin/settings', ['title'=>'Store settings','schema'=>$schema]);
     }
 
+    public static function adminOrderEmailReceipt(string $id): void
+    {
+        $user = Auth::requirePermission('emails.receipts'); verify_csrf();
+        $order = Database::one('SELECT * FROM orders WHERE id=?', [(int) $id]);
+        $email = strtolower(trim((string) ($_POST['email'] ?? $order['customer_email'] ?? '')));
+        if (!EmailService::readiness(false)['ready']) {
+            flash('error', 'Enable email and configure a valid From address in Settings first.');
+        } elseif (!$order || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            flash('error', 'Enter a valid receipt email address.');
+        } elseif (!EmailService::queueReceipt((int) $order['id'], $email, (int) $user['id'], true)) {
+            flash('error', 'The receipt could not be queued.');
+        } else {
+            self::audit('receipt.queued', 'order', (string) $order['id'], ['recipient' => $email]);
+            flash('success', 'Receipt queued. Its sent or failed status will be recorded here.');
+        }
+        redirect('admin/orders/' . (int) $id);
+    }
+
+    public static function adminEmail(): void
+    {
+        Auth::requirePermission('campaigns.manage');
+        render('admin/email', [
+            'title' => 'Email center', 'readiness' => EmailService::readiness(true),
+            'campaigns' => Database::all('SELECT * FROM email_campaigns ORDER BY created_at DESC LIMIT 30'),
+            'queue' => Database::all('SELECT * FROM email_queue ORDER BY created_at DESC LIMIT 30'),
+            'products' => Database::all("SELECT id,name,brand,created_at FROM products WHERE status='active' ORDER BY created_at DESC,name LIMIT 20"),
+            'counts' => Database::one("SELECT SUM(status='queued') queued,SUM(status='sent') sent,SUM(status='failed') failed FROM email_queue") ?: [],
+        ]);
+    }
+
+    public static function adminEmailCampaignCreate(): void
+    {
+        $user = Auth::requirePermission('campaigns.manage'); verify_csrf();
+        try {
+            $id = CampaignService::createDraft($_POST, (int) $user['id']);
+            self::audit('campaign.created', 'email_campaign', (string) $id);
+            flash('success', 'Campaign saved as a draft. Review it before approving delivery.');
+        } catch (RuntimeException $error) { flash('error', $error->getMessage()); }
+        redirect('admin/email');
+    }
+
+    public static function adminEmailCampaignApprove(string $id): void
+    {
+        $user = Auth::requirePermission('campaigns.manage'); verify_csrf();
+        try {
+            $count = CampaignService::approve((int) $id, (int) $user['id']);
+            self::audit('campaign.approved', 'email_campaign', $id, ['recipients' => $count]);
+            flash('success', "Campaign approved and queued for {$count} eligible customers.");
+        } catch (RuntimeException $error) { flash('error', $error->getMessage()); }
+        redirect('admin/email');
+    }
+
+    public static function adminEmailCampaignCancel(string $id): void
+    {
+        Auth::requirePermission('campaigns.manage'); verify_csrf();
+        Database::execute("UPDATE email_campaigns SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='draft'", [(int) $id]);
+        self::audit('campaign.cancelled', 'email_campaign', $id); flash('success', 'Draft campaign cancelled.'); redirect('admin/email');
+    }
+
+    public static function adminEmailQueueRun(): void
+    {
+        Auth::requirePermission('campaigns.manage'); verify_csrf();
+        $result = EmailService::processQueue(25);
+        self::audit('email.queue.processed', 'email_queue', 'manual', $result);
+        flash('success', "Processed {$result['processed']} messages: {$result['sent']} sent, {$result['failed']} permanently failed.");
+        redirect('admin/email');
+    }
+
     public static function adminPromotions(): void
     {
         Auth::requirePermission('promotions.manage');
@@ -811,7 +927,7 @@ final class Controller
     public static function health(): void
     {
         header('Content-Type: application/json; charset=utf-8');
-        $checks=['php'=>PHP_VERSION,'sqlite'=>extension_loaded('pdo_sqlite'),'database'=>false,'uploads_writable'=>is_writable(APP_ROOT.'/public/uploads')];
+        $checks=['sqlite'=>extension_loaded('pdo_sqlite'),'database'=>false,'uploads_writable'=>is_writable(APP_ROOT.'/public/uploads')];
         try { Database::pdo()->query('SELECT 1')->fetchColumn(); $checks['database']=true; } catch (\Throwable) {}
         $ok=$checks['sqlite']&&$checks['database']&&$checks['uploads_writable'];
         http_response_code($ok?200:503);
@@ -825,6 +941,7 @@ final class Controller
             'ordering_enabled'=>'bool','pickup_enabled'=>'bool','delivery_enabled'=>'bool','guest_checkout_enabled'=>'bool','registration_enabled'=>'bool','manual_confirmation'=>'bool','same_day_enabled'=>'bool','scheduled_enabled'=>'bool',
             'pay_at_pickup_enabled'=>'bool','manual_prepaid_enabled'=>'bool','pickup_minimum_cents'=>'int','delivery_minimum_cents'=>'int','extended_delivery_minimum_cents'=>'int','delivery_fee_cents'=>'int','service_areas'=>'string','extended_areas'=>'string','pickup_address'=>'string',
             'pos_enabled'=>'bool','pos_cash_enabled'=>'bool','pos_external_card_enabled'=>'bool','pos_tax_enabled'=>'bool','pos_tax_rate'=>'string','pos_print_receipt_enabled'=>'bool','pos_email_receipt_enabled'=>'bool','pos_manual_discount_enabled'=>'bool','pos_max_discount_percent'=>'int','customer_capture_enabled'=>'bool','marketing_opt_in_enabled'=>'bool',
+            'email_enabled'=>'bool','email_order_confirmation_enabled'=>'bool','email_from_name'=>'string','email_from_address'=>'string','email_reply_to'=>'string','email_dns_verified'=>'bool','marketing_campaigns_enabled'=>'bool','marketing_physical_address'=>'string','marketing_hopeline'=>'string','marketing_campaign_day'=>'int',
         ];
     }
 

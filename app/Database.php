@@ -58,5 +58,11 @@ final class Database
         $stmt = self::pdo()->prepare($sql);
         return $stmt->execute($params);
     }
-}
 
+    public static function executeAffected(string $sql, array $params = []): int
+    {
+        $stmt = self::pdo()->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->rowCount();
+    }
+}

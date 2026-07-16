@@ -2,6 +2,7 @@
 /storage/*.sqlite-*
 /storage/backups/*
 !/storage/backups/.gitkeep
+/storage/imports/*
 /public/uploads/*
 !/public/uploads/.gitkeep
 !/public/uploads/.htaccess

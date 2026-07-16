@@ -11,10 +11,13 @@ require __DIR__ . '/../app/bootstrap.php';
 use App\Database;
 use App\Auth;
 use App\CustomerService;
+use App\CampaignService;
 use App\OrderService;
 use App\ReportingService;
 use App\Seed;
 use App\Store;
+use App\EmailService;
+use App\CustomerImportService;
 
 $pdo = Database::pdo();
 if ((int) $pdo->query("SELECT COUNT(*) FROM users WHERE role='owner'")->fetchColumn() === 0) {
@@ -107,6 +110,9 @@ $posRestored = Database::one('SELECT stock_quantity FROM product_variants WHERE 
 Auth::syncPermissions($staffId, ['pos.access','pos.complete','pos.discount','orders.view','products.view']);
 Store::setSetting('pos_manual_discount_enabled', true, 'bool');
 Store::setSetting('pos_max_discount_percent', 20, 'int');
+Store::setSetting('email_enabled', true, 'bool');
+Store::setSetting('email_from_address', 'receipts@example.test');
+Store::setSetting('email_from_name', 'Test Shop');
 $discountedPosResult = OrderService::createPos([
     'cart_json' => json_encode([['variant_id' => $posVariantId, 'quantity' => 1]]),
     'payment_method' => 'external_card',
@@ -140,6 +146,44 @@ $pdo->exec('DELETE FROM promotions');
 Seed::run();
 $promotionsRemainDeleted = (int) $pdo->query('SELECT COUNT(*) FROM promotions')->fetchColumn() === 0;
 
+// Email queue, consent, campaign approval, and signed unsubscribe lifecycle.
+Store::setSetting('email_enabled', true, 'bool');
+Store::setSetting('email_from_address', 'receipts@example.test');
+Store::setSetting('email_from_name', 'Test Shop');
+Store::setSetting('email_dns_verified', true, 'bool');
+Store::setSetting('marketing_campaigns_enabled', true, 'bool');
+Store::setSetting('marketing_physical_address', '123 Test Street, Huntington, NY 11743');
+Store::setSetting('license_number', 'TEST-LICENSE-001');
+$receiptBeforeWorker = Database::one('SELECT receipt_email_status FROM orders WHERE id=?', [$discountedPosResult['id']]);
+$workerResult = EmailService::processQueue(100);
+$receiptAfterWorker = Database::one('SELECT receipt_email_status,receipt_email_last_sent_at FROM orders WHERE id=?', [$discountedPosResult['id']]);
+$campaignId = CampaignService::createDraft([
+    'title' => 'Test new products', 'subject' => 'Test new products', 'intro_text' => 'A consent-safe test message.',
+    'product_ids' => [$posProductId],
+], $ownerId);
+$campaignRecipients = CampaignService::approve($campaignId, $ownerId);
+$campaignWorkerResult = EmailService::processQueue(100);
+$campaignRow = Database::one('SELECT * FROM email_campaigns WHERE id=?', [$campaignId]);
+$token = EmailService::unsubscribeToken($receiptCustomer);
+$unsubscribePreview = $token ? EmailService::unsubscribe($token, false) : null;
+$stillSubscribed = Database::one('SELECT marketing_opt_in FROM customer_profiles WHERE id=?', [(int) $receiptCustomer['id']]);
+$unsubscribed = $token ? EmailService::unsubscribe($token) : null;
+$receiptCustomerAfterUnsubscribe = Database::one('SELECT * FROM customer_profiles WHERE id=?', [(int) $receiptCustomer['id']]);
+
+// Excel-compatible CSV preview, encrypted staging, safe matching, and formula rejection.
+$csv = tempnam(sys_get_temp_dir(), 'customer-import-');
+file_put_contents($csv, "name,email,phone,address1,address2,city,state,zip,marketing_opt_in,consent_date,consent_source,notes\nImported Customer,imported@example.test,6315550177,1 Main St,,Huntington,NY,11743,yes,2026-07-16,legacy signup,Imported new note\n");
+$importPreview = CustomerImportService::preview(['error' => UPLOAD_ERR_OK, 'tmp_name' => $csv, 'size' => filesize($csv), 'name' => 'customers.csv'], $ownerId);
+$importResult = CustomerImportService::confirm($ownerId);
+$importedCustomer = Database::one('SELECT * FROM customer_profiles WHERE email_key=?', ['imported@example.test']);
+@unlink($csv);
+$unsafeCsv = tempnam(sys_get_temp_dir(), 'customer-import-unsafe-');
+file_put_contents($unsafeCsv, "name,email,phone\n=HYPERLINK(\"https://bad.test\"),bad@example.test,6315550188\n");
+$unsafeRejected = false;
+try { CustomerImportService::preview(['error' => UPLOAD_ERR_OK, 'tmp_name' => $unsafeCsv, 'size' => filesize($unsafeCsv), 'name' => 'unsafe.csv'], $ownerId); }
+catch (RuntimeException) { $unsafeRejected = true; }
+@unlink($unsafeCsv);
+
 $checks = [
     'products seeded' => (int) $pdo->query('SELECT COUNT(*) FROM products')->fetchColumn() >= 40,
     'variants seeded' => (int) $pdo->query('SELECT COUNT(*) FROM product_variants')->fetchColumn() >= 40,
@@ -161,6 +205,8 @@ $checks = [
     'POS external terminal and discount calculated' => $discountedPosOrder['payment_method'] === 'external_card' && (int) $discountedPosOrder['discount_cents'] === 100 && (int) $discountedPosOrder['tax_cents'] === 80 && (int) $discountedPosOrder['total_cents'] === 980,
     'identified POS sale linked to customer' => (int) $discountedPosOrder['customer_id'] > 0 && $receiptCustomer !== null && $receiptCustomer['email_key'] === 'receipt@example.test',
     'marketing consent preserved' => (int) $receiptCustomer['marketing_opt_in'] === 1,
+    'marketing consent provenance recorded' => !empty($receiptCustomer['marketing_consent_at']) && $receiptCustomer['marketing_consent_source'] === 'point of sale',
+    'campaign age verification recorded' => !empty($receiptCustomer['marketing_age_verified_at']) && $receiptCustomer['marketing_age_verified_source'] === 'POS ID check',
     'conflicting contact data cannot overwrite another customer' => $receiptAfterConflict['email'] === 'receipt@example.test' && $receiptAfterConflict['phone'] === '6315550166',
     'anonymous POS sale stays out of client list' => $posOrder['customer_id'] === null,
     'sales report aggregates paid history' => (int) $salesReport['kpis']['orders'] >= 1 && (int) $salesReport['kpis']['revenue'] >= 980 && $salesReport['top_products'] !== [],
@@ -170,6 +216,15 @@ $checks = [
     'promotion deletion fixture available' => $initialPromotionCount >= 1,
     'promotion seed initialized' => $promotionSeedInitialized,
     'deleted promotions stay deleted' => $promotionsRemainDeleted,
+    'email security migration applied' => in_array('receipt_email_status', array_column(Database::all('PRAGMA table_info(orders)'), 'name'), true) && (int) $pdo->query("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('email_queue','email_campaigns','login_rate_limits')")->fetchColumn() === 3,
+    'POS receipt queued before worker' => ($receiptBeforeWorker['receipt_email_status'] ?? '') === 'queued',
+    'email worker records accepted delivery' => $workerResult['sent'] >= 1 && ($receiptAfterWorker['receipt_email_status'] ?? '') === 'sent' && !empty($receiptAfterWorker['receipt_email_last_sent_at']),
+    'campaign requires approval and eligible consent' => $campaignRecipients >= 1 && ($campaignRow['status'] ?? '') === 'completed' && (int) $campaignRow['recipient_count'] === $campaignRecipients && $campaignWorkerResult['sent'] >= 1,
+    'unsubscribe preview has no side effect' => $unsubscribePreview !== null && (int) $stillSubscribed['marketing_opt_in'] === 1,
+    'signed unsubscribe suppresses marketing' => $unsubscribed !== null && (int) $receiptCustomerAfterUnsubscribe['marketing_opt_in'] === 0 && !empty($receiptCustomerAfterUnsubscribe['marketing_unsubscribed_at']),
+    'customer CSV preview and confirm work' => $importPreview['total'] === 1 && $importResult['created'] === 1 && $importedCustomer !== null,
+    'import records explicit consent provenance' => (int) $importedCustomer['marketing_opt_in'] === 1 && $importedCustomer['marketing_consent_source'] === 'legacy signup',
+    'spreadsheet formula injection rejected' => $unsafeRejected,
 ];
 
 $failed = array_keys(array_filter($checks, static fn(bool $ok): bool => !$ok));

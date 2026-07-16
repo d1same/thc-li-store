@@ -20,6 +20,9 @@ final class Auth
             'customers.view' => 'View customer profiles and purchase history',
             'customers.edit' => 'Edit customer contact details and private notes',
             'customers.export' => 'Export customer contact lists',
+            'customers.import' => 'Import customer spreadsheets',
+            'emails.receipts' => 'Send and resend customer receipts',
+            'campaigns.manage' => 'Draft and approve customer email campaigns',
             'products.view' => 'View products and inventory',
             'products.create' => 'Add products and options',
             'products.edit' => 'Edit products, prices and stock',
@@ -44,20 +47,24 @@ final class Auth
 
     public static function attempt(string $email, string $password): bool
     {
-        $window = (int) ($_SESSION['login_window'] ?? 0);
-        if ($window < time() - 900) {
-            $_SESSION['login_window'] = time();
-            $_SESSION['login_attempts'] = 0;
-        }
-        if ((int) ($_SESSION['login_attempts'] ?? 0) >= 5) {
+        $normalized = strtolower(trim($email));
+        $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+        $key = hash_hmac('sha256', $normalized . '|' . $ip, (string) (getenv('APP_KEY') ?: 'local-rate-limit'));
+        Database::execute("DELETE FROM login_rate_limits WHERE updated_at<datetime('now','-2 days')");
+        $limit = Database::one('SELECT * FROM login_rate_limits WHERE key_hash=?', [$key]);
+        if ($limit && !empty($limit['blocked_until']) && strtotime((string) $limit['blocked_until']) > time()) {
             return false;
         }
-        $user = Database::one('SELECT * FROM users WHERE email = ? COLLATE NOCASE AND status = ?', [trim($email), 'active']);
+        $user = Database::one('SELECT * FROM users WHERE email = ? COLLATE NOCASE AND status = ?', [$normalized, 'active']);
         if (!$user || !password_verify($password, $user['password_hash'])) {
-            $_SESSION['login_attempts'] = (int) ($_SESSION['login_attempts'] ?? 0) + 1;
+            if (!$limit || strtotime((string) $limit['window_started_at']) < time() - 900) {
+                Database::execute("INSERT INTO login_rate_limits (key_hash,attempts,window_started_at,updated_at) VALUES (?,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) ON CONFLICT(key_hash) DO UPDATE SET attempts=1,window_started_at=CURRENT_TIMESTAMP,blocked_until=NULL,updated_at=CURRENT_TIMESTAMP", [$key]);
+            } else {
+                Database::execute("UPDATE login_rate_limits SET attempts=attempts+1,blocked_until=CASE WHEN attempts+1>=5 THEN datetime('now','+15 minutes') ELSE blocked_until END,updated_at=CURRENT_TIMESTAMP WHERE key_hash=?", [$key]);
+            }
             return false;
         }
-        unset($_SESSION['login_attempts'], $_SESSION['login_window']);
+        Database::execute('DELETE FROM login_rate_limits WHERE key_hash=?', [$key]);
         session_regenerate_id(true);
         $_SESSION['user_id'] = (int) $user['id'];
         self::$cachedUser = $user;

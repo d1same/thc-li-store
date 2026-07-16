@@ -33,6 +33,7 @@
       <?php if ($order['fulfillment'] === 'delivery'): ?><div><dt>Address</dt><dd><?= e($order['address1'].' '.$order['address2'].', '.$order['city'].', '.$order['state'].' '.$order['postal_code']) ?></dd></div><?php endif; ?>
       <div><dt>Requested time</dt><dd><?= e($order['requested_time'] ?: 'ASAP / confirm with customer') ?></dd></div>
     </dl>
+    <?php if(can('emails.receipts')): ?><form method="post" action="<?= url('admin/orders/'.$order['id'].'/email-receipt') ?>" class="form-grid"><?= csrf_field() ?><label class="full">Email receipt<input type="email" name="email" value="<?= e($order['customer_email']) ?>" required><small>Status: <?= e(ucwords(str_replace('_',' ',$order['receipt_email_status']??'not requested'))) ?><?php if(!empty($order['receipt_email_last_sent_at'])): ?> · last sent <?= e(date('M j, Y g:i A',strtotime($order['receipt_email_last_sent_at']))) ?><?php endif; ?></small></label><button class="button button-secondary" type="submit"><i data-lucide="send"></i>Queue receipt</button></form><?php endif; ?>
   </div>
 
   <?php if (can('orders.manage')): ?><form method="post" class="admin-panel order-update">

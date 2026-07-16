@@ -81,6 +81,10 @@ final class CustomerService
                 $address['city'] ?: ($profile['city'] ?? ''), $address['state'], $address['postal_code'] ?: ($profile['postal_code'] ?? ''),
                 $marketing, (int) $profile['id'],
             ]);
+            if (!empty($data['marketing_opt_in'])) {
+                $pdo->prepare("UPDATE customer_profiles SET marketing_consent_at=CURRENT_TIMESTAMP,marketing_consent_source=?,marketing_unsubscribed_at=NULL WHERE id=?")
+                    ->execute([mb_substr(trim((string) ($data['marketing_consent_source'] ?? 'customer form')), 0, 100), (int) $profile['id']]);
+            }
             return (int) $profile['id'];
         }
 
@@ -91,7 +95,12 @@ final class CustomerService
             $userId, $email, $phoneKey, $name, $email ?? '', $phone, $address['address1'], $address['address2'],
             $address['city'], $address['state'], $address['postal_code'], $marketing,
         ]);
-        return (int) $pdo->lastInsertId();
+        $id = (int) $pdo->lastInsertId();
+        if ($marketing === 1) {
+            $pdo->prepare("UPDATE customer_profiles SET marketing_consent_at=CURRENT_TIMESTAMP,marketing_consent_source=? WHERE id=?")
+                ->execute([mb_substr(trim((string) ($data['marketing_consent_source'] ?? 'customer form')), 0, 100), $id]);
+        }
+        return $id;
     }
 
     public static function backfillUnlinkedOrders(int $limit = 1000): int
@@ -174,6 +183,9 @@ final class CustomerService
                 trim((string) ($data['private_notes'] ?? '')), $id,
             ]
         );
+        if (!empty($data['marketing_opt_in']) && (int) $profile['marketing_opt_in'] !== 1) {
+            Database::execute("UPDATE customer_profiles SET marketing_consent_at=CURRENT_TIMESTAMP,marketing_consent_source='staff profile update',marketing_unsubscribed_at=NULL WHERE id=?", [$id]);
+        }
     }
 
     private static function keyOwnedByAnother(PDO $pdo, string $column, string $value, int $id): bool

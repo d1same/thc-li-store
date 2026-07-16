@@ -46,6 +46,18 @@ The SQLite database, runtime configuration, uploaded photos, and backups must no
 - Revenue includes only paid, completed orders. Cancelled orders remain permanently visible in order history but are excluded from revenue.
 - Report date ranges use the business city and timezone configured in **Owner desk → Settings**. Existing timestamps are never rewritten when the timezone changes.
 
+## Receipts, customer imports, and campaigns
+
+- Receipt and order-confirmation emails enter a private queue. The order page shows queued, sent, or failed status, and authorized staff can resend a receipt.
+- Run the queue every five minutes from cPanel Cron: `*/5 * * * * /usr/local/bin/php /home/CPANEL_USER/thcli/scripts/email-worker.php` (confirm the PHP path first).
+- Configure a domain From address, reply-to address, physical business address, license, and SPF/DKIM/DMARC verification under **Owner desk → Settings** before enabling email.
+- Customer imports accept CSV files exported from Excel. Download the template, upload for an encrypted preview, and confirm after reviewing matches. The importer never replaces order history or existing private notes.
+- Marketing imports require an explicit yes plus a consent date and source. Unsubscribed contacts remain suppressed unless they later give new explicit consent.
+- Product campaigns are always drafts first. An authorized user must approve each campaign; only eligible opted-in customers are queued, and every message contains an unsubscribe link and compliance footer.
+- To create (but never send) a monthly draft automatically, run `0 9 * * * /usr/local/bin/php /home/CPANEL_USER/thcli/scripts/monthly-campaign-draft.php`. The configured day controls when the draft is created.
+
+Local PHP `mail()` is the initial cPanel transport. Confirm delivery with the host and set SPF, DKIM, and DMARC for the exact sending domain. A “sent” status records transport acceptance, not guaranteed inbox placement.
+
 ## Staff permissions
 
 - The owner always retains full access.
