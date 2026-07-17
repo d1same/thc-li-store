@@ -93,4 +93,5 @@ $variantRows = $variants ?: [['label' => 'Single', 'price' => '', 'sale_price' =
     <a class="button button-secondary button-wide" href="<?= url('admin/products') ?>">Cancel</a>
     <?php if ($editing && can('products.archive')): ?><button class="button button-danger button-wide" type="submit" formaction="<?= url('admin/products/' . $product['id'] . '/archive') ?>" formmethod="post" data-confirm="Archive this product? It will leave the menu, while old receipts remain intact."><i data-lucide="archive"></i>Archive product</button><?php endif; ?>
   </aside>
+  <button class="mobile-product-save button button-primary" type="submit"><i data-lucide="save"></i>Save product</button>
 </form>

@@ -24,26 +24,26 @@ $catalogUrl = static function (array $overrides = []) use ($filters): string {
     </form>
     <span class="admin-result-count">Showing <?= (int) $pagination['from'] ?>–<?= (int) $pagination['to'] ?> of <?= (int) $pagination['total'] ?></span>
   </div>
-  <div class="admin-table-wrap">
-    <table class="admin-table product-admin-table">
+  <div class="admin-table-wrap responsive-table-wrap">
+    <table class="admin-table product-admin-table responsive-card-table">
       <thead><tr><th>Product</th><th>Category</th><th>Options</th><th>Inventory</th><th>Starting price</th><th>Status</th><th></th></tr></thead>
       <tbody>
         <?php foreach ($products as $product):
           $searchText = strtolower(trim(implode(' ', [$product['name'], $product['brand'], $product['category_name'], $product['variant_search'] ?? ''])));
         ?>
           <tr data-admin-product data-search="<?= e($searchText) ?>">
-            <td><div class="product-cell"><?php if ($product['image_path']): ?><img src="<?= url($product['image_path']) ?>" alt=""><?php else: ?><span><i data-lucide="image"></i></span><?php endif; ?><div><strong><?= e($product['name']) ?></strong><small><?= e($product['brand']) ?></small></div></div></td>
-            <td><?= e($product['category_name']) ?></td>
-            <td><?= (int) $product['variant_count'] ?> <?= (int) $product['variant_count'] === 1 ? 'option' : 'options' ?></td>
-            <td><div class="inventory-summary">
+            <td data-primary><div class="product-cell"><?php if ($product['image_path']): ?><img src="<?= url($product['image_path']) ?>" alt=""><?php else: ?><span><i data-lucide="image"></i></span><?php endif; ?><div><strong><?= e($product['name']) ?></strong><small><?= e($product['brand']) ?></small></div></div></td>
+            <td data-label="Category"><?= e($product['category_name']) ?></td>
+            <td data-label="Options"><?= (int) $product['variant_count'] ?> <?= (int) $product['variant_count'] === 1 ? 'option' : 'options' ?></td>
+            <td data-label="Inventory"><div class="inventory-summary">
               <?php if ((int) $product['tracked_variants'] > 0): ?><strong><?= (int) $product['tracked_quantity'] ?> left</strong><?php else: ?><strong>Not tracked</strong><?php endif; ?>
               <?php if ((int) $product['low_stock_variants'] > 0): ?><small><?= (int) $product['low_stock_variants'] ?> low</small><?php endif; ?>
               <?php if ((int) $product['sold_out_variants'] > 0): ?><small><?= (int) $product['sold_out_variants'] ?> sold out</small><?php endif; ?>
               <?php if ((int) $product['untracked_variants'] > 0 && (int) $product['tracked_variants'] > 0): ?><small><?= (int) $product['untracked_variants'] ?> untracked</small><?php endif; ?>
             </div></td>
-            <td><?= money((int) $product['from_price']) ?></td>
-            <td><span class="status-pill status-<?= e($product['status']) ?>"><?= e(ucwords(str_replace('_', ' ', $product['status']))) ?></span></td>
-            <td><a class="button button-small button-secondary" href="<?= url('admin/products/' . $product['id'] . '/edit') ?>">Edit</a></td>
+            <td data-label="From"><?= money((int) $product['from_price']) ?></td>
+            <td data-label="Status"><span class="status-pill status-<?= e($product['status']) ?>"><?= e(ucwords(str_replace('_', ' ', $product['status']))) ?></span></td>
+            <td data-action><a class="button button-small button-secondary" href="<?= url('admin/products/' . $product['id'] . '/edit') ?>">Edit product</a></td>
           </tr>
         <?php endforeach; ?>
         <?php if (!$products): ?><tr class="admin-search-empty"><td colspan="7"><div><i data-lucide="search-x"></i><strong>No products found</strong><span>Try another search or category.</span><a class="button button-secondary button-small" href="<?= url('admin/products') ?>">Clear filters</a></div></td></tr><?php endif; ?>
