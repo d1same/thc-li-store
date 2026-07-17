@@ -32,7 +32,7 @@ jobs:
           APP_URL: https://thc-li.com
           APP_KEY: github-actions-security-smoke-key-2026
           APP_SETUP_TOKEN: github-actions-setup-token-at-least-32-characters
-          DB_PATH: storage/ci-security.sqlite
+          DB_PATH: storage/ci-security-test.sqlite
         run: php tests/smoke.php
 
   secrets:
