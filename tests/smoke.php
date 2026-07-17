@@ -191,10 +191,10 @@ catch (RuntimeException) { $unsafeRejected = true; }
 @unlink($unsafeCsv);
 
 // Security hardening: deterministic TOTP, encrypted secrets, fixed-window abuse limits and forced staff password change.
-$rfcSecret = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
-$totpMatches = Totp::verify($rfcSecret, '287082', 59);
-$encryptedMfaSecret = Totp::encryptSecret($rfcSecret);
-$mfaRoundTrip = Totp::decryptSecret($encryptedMfaSecret) === $rfcSecret;
+$totpFixture = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+$totpMatches = Totp::verify($totpFixture, '287082', 59);
+$encryptedMfaSecret = Totp::encryptSecret($totpFixture);
+$mfaRoundTrip = Totp::decryptSecret($encryptedMfaSecret) === $totpFixture;
 $mfaStartRejectedWithoutPassword = false;
 $ownerUser = Database::one('SELECT * FROM users WHERE id=?', [$ownerId]);
 try {

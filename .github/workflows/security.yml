@@ -23,7 +23,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Verify PHP extensions
-        run: php -r "foreach(['pdo_sqlite','fileinfo','mbstring','openssl'] as $extension){if(!extension_loaded($extension)){fwrite(STDERR,\"Missing $extension\\n\");exit(1);}}"
+        run: php -r 'foreach (["pdo_sqlite", "fileinfo", "mbstring", "openssl"] as $extension) { if (!extension_loaded($extension)) { fwrite(STDERR, "Missing {$extension}\n"); exit(1); } }'
       - name: Lint PHP
         run: find app scripts tests public -name '*.php' -print0 | xargs -0 -n1 php -l
       - name: Run isolated smoke suite
@@ -36,7 +36,7 @@ jobs:
         run: php tests/smoke.php
 
   secrets:
-    name: Secret history scan
+    name: Secret scan
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -48,6 +48,7 @@ jobs:
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
 
   sast:
     name: Semgrep SAST

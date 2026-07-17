@@ -28,6 +28,14 @@ function money(int $cents): string
     return '$' . number_format($cents / 100, 2);
 }
 
+function output_json(array $payload, int $flags = 0): void
+{
+    echo json_encode(
+        $payload,
+        $flags | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR
+    );
+}
+
 function csrf_token(): string
 {
     if (empty($_SESSION['_csrf'])) {

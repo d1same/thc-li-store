@@ -29,6 +29,6 @@
 
 ## Automated checks
 
-The GitHub workflow runs PHP linting, an isolated SQLite smoke suite, full-history Gitleaks scanning, Semgrep SAST, and Trivy filesystem scanning. Third-party actions are pinned to immutable commit SHAs and Dependabot monitors action updates.
+The GitHub workflow runs PHP linting, an isolated SQLite smoke suite, Gitleaks secret scanning, Semgrep SAST, and Trivy filesystem scanning. Third-party actions are pinned to immutable commit SHAs and Dependabot monitors action updates.
 
 Automated scans supplement but do not replace periodic manual authorization and business-logic testing.

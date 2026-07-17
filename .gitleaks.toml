@@ -1,0 +1,8 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Public RFC 6238 TOTP fixture"
+paths = ['''tests/smoke\.php''']
+regexTarget = "match"
+regexes = ['''GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ''']

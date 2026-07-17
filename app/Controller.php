@@ -411,22 +411,12 @@ final class Controller
         $requestedPerPage = (int) ($_GET['per_page'] ?? 20);
         $perPage = in_array($requestedPerPage, [20, 50, 100], true) ? $requestedPerPage : 20;
         $page = max(1, (int) ($_GET['page'] ?? 1));
-        $where = ['1=1'];
-        $params = [];
-        if ($search !== '') {
-            $where[] = '(c.name LIKE ? OR c.email LIKE ? OR c.phone LIKE ? OR c.city LIKE ? OR c.postal_code LIKE ?)';
-            $term = '%' . $search . '%';
-            array_push($params, $term, $term, $term, $term, $term);
-        }
-        if ($status !== '') {
-            $where[] = 'c.status=?';
-            $params[] = $status;
-        }
-        if ($marketing) {
-            $where[] = 'c.marketing_opt_in=1';
-        }
-        $whereSql = implode(' AND ', $where);
-        $count = (int) (Database::one("SELECT COUNT(*) count FROM customer_profiles c WHERE {$whereSql}", $params)['count'] ?? 0);
+        $term = '%' . $search . '%';
+        $filters = [$search, $term, $term, $term, $term, $term, $status, $status, $marketing ? 1 : 0];
+        $whereSql = "(? = '' OR c.name LIKE ? OR c.email LIKE ? OR c.phone LIKE ? OR c.city LIKE ? OR c.postal_code LIKE ?)
+                     AND (? = '' OR c.status = ?)
+                     AND (? = 0 OR c.marketing_opt_in = 1)";
+        $count = (int) (Database::one("SELECT COUNT(*) count FROM customer_profiles c WHERE {$whereSql}", $filters)['count'] ?? 0);
         $totalPages = max(1, (int) ceil($count / $perPage));
         $page = min($page, $totalPages);
         $offset = ($page - 1) * $perPage;
@@ -441,8 +431,8 @@ final class Controller
              WHERE {$whereSql}
              GROUP BY c.id
              ORDER BY COALESCE(MAX(o.created_at),c.last_seen_at) DESC,c.name
-             LIMIT {$perPage} OFFSET {$offset}",
-            $params
+             LIMIT ? OFFSET ?",
+            [...$filters, $perPage, $offset]
         );
         $summary = Database::one(
             "SELECT COUNT(*) customers,
@@ -468,20 +458,20 @@ final class Controller
         header('Content-Type: application/json; charset=utf-8');
         if (!Auth::can('customers.view', $staff)) {
             http_response_code(403);
-            echo json_encode(['customers' => []]);
+            output_json(['customers' => []]);
             return;
         }
         $limit = RateLimiter::hit('customer.search', (string) $staff['id'], 60, 60, 60);
         if (!$limit['allowed']) {
             http_response_code(429);
             header('Retry-After: ' . (int) $limit['retry_after']);
-            echo json_encode(['customers' => [], 'error' => 'rate_limited']);
+            output_json(['customers' => [], 'error' => 'rate_limited']);
             return;
         }
         CustomerService::syncDirectory(300);
         $search = mb_substr(trim((string) ($_GET['q'] ?? '')), 0, 80);
         if (mb_strlen($search) < 2) {
-            echo json_encode(['customers' => []]);
+            output_json(['customers' => []]);
             return;
         }
         $term = '%' . $search . '%';
@@ -492,7 +482,7 @@ final class Controller
              ORDER BY last_seen_at DESC LIMIT 8",
             [$term, $term, $term]
         );
-        echo json_encode(['customers' => $customers], JSON_UNESCAPED_SLASHES);
+        output_json(['customers' => $customers], JSON_UNESCAPED_SLASHES);
     }
 
     public static function adminCustomer(string $id): void
@@ -1164,7 +1154,7 @@ final class Controller
         if ($user && $user['role']==='owner') {
             $payload['checks']=$checks;
         }
-        echo json_encode($payload, JSON_PRETTY_PRINT);
+        output_json($payload, JSON_PRETTY_PRINT);
     }
 
     private static function settingsSchema(): array
