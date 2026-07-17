@@ -39,7 +39,7 @@ foreach ($catalog as $product) {
 <?php endif; ?>
 
 <section class="pos-workspace" data-pos-app data-pos-enabled="<?= setting('pos_enabled', true) ? '1' : '0' ?>" data-can-complete="<?= $canComplete ? '1' : '0' ?>" data-tax-enabled="<?= setting('pos_tax_enabled', false) ? '1' : '0' ?>" data-tax-rate="<?= e((string) setting('pos_tax_rate', '0')) ?>" data-discount-enabled="<?= setting('pos_manual_discount_enabled', false) && $canDiscount ? '1' : '0' ?>">
-  <script type="application/json" data-pos-catalog-json><?= json_encode($posCatalog, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES) ?></script>
+  <textarea hidden data-pos-catalog-json><?= json_encode($posCatalog, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES) ?></textarea>
 
   <div class="pos-catalog-panel">
     <div class="pos-catalog-tools">

@@ -915,3 +915,6 @@ html.admin-nav-collapsed .admin-main { margin-left: 82px; }
   .admin-body { background: white; }
   .pos-receipt { box-shadow: none; padding: 12px; }
 }
+.form-honeypot{position:absolute!important;left:-10000px!important;width:1px!important;height:1px!important;overflow:hidden!important;pointer-events:none!important}
+.security-account-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;margin-bottom:24px}.security-account-grid .account-panel{margin:0}.security-steps{margin:0;padding-left:22px;color:var(--muted);display:grid;gap:8px}.mfa-secret{display:block;padding:16px;border-radius:14px;background:var(--cream);font-size:1.05rem;font-weight:800;letter-spacing:.14em;overflow-wrap:anywhere}.recovery-code-panel{margin-bottom:40px}.recovery-code-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.recovery-code-grid code{padding:12px 14px;border-radius:12px;background:var(--cream);font-weight:800;letter-spacing:.08em;text-align:center}.security-check-grid article strong{font-size:1.05rem}.admin-table td small{display:block;color:var(--muted);margin-top:3px}
+@media(max-width:760px){.security-account-grid,.recovery-code-grid{grid-template-columns:1fr}.mfa-secret{font-size:.9rem;letter-spacing:.09em}}

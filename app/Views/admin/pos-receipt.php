@@ -1,5 +1,5 @@
-<section class="pos-receipt-shell">
-  <div class="pos-receipt-actions"><a class="button button-secondary" href="<?= url('admin/pos') ?>"><i data-lucide="arrow-left"></i>New sale</a><?php if (setting('pos_print_receipt_enabled',true)): ?><button class="button button-primary" type="button" onclick="window.print()"><i data-lucide="printer"></i>Print receipt</button><?php endif; ?><?php if (can('orders.view')): ?><a class="button button-secondary" href="<?= url('admin/orders/' . $order['id']) ?>"><i data-lucide="receipt-text"></i>Order details</a><?php endif; ?></div>
+<section class="pos-receipt-shell" data-clear-pos-cart>
+  <div class="pos-receipt-actions"><a class="button button-secondary" href="<?= url('admin/pos') ?>"><i data-lucide="arrow-left"></i>New sale</a><?php if (setting('pos_print_receipt_enabled',true)): ?><button class="button button-primary" type="button" data-print-page><i data-lucide="printer"></i>Print receipt</button><?php endif; ?><?php if (can('orders.view')): ?><a class="button button-secondary" href="<?= url('admin/orders/' . $order['id']) ?>"><i data-lucide="receipt-text"></i>Order details</a><?php endif; ?></div>
   <article class="pos-receipt admin-panel">
     <div class="receipt-brand"><img src="<?= asset('brand/thc-li-wordmark-v2.png') ?>" alt="<?= e(setting('store_name')) ?>"><span>In-store receipt</span></div>
     <div class="receipt-number"><span><?= e($order['order_number']) ?></span><small><?= e(date('M j, Y · g:i A', strtotime($order['created_at']))) ?></small></div>
@@ -9,4 +9,3 @@
     <p class="receipt-warning"><?= e(setting('required_warning')) ?></p>
   </article>
 </section>
-<script>sessionStorage.removeItem('thcli_pos_cart_v1');</script>

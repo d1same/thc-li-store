@@ -52,6 +52,7 @@ final class Seed
             'marketing_physical_address' => ['', 'string'],
             'marketing_hopeline' => ['New York State HOPEline: 1-877-846-7369 or text HOPENY to 467369.', 'string'],
             'marketing_campaign_day' => ['1', 'int'],
+            'staff_mfa_required' => ['0', 'bool'],
             'pickup_minimum_cents' => ['0', 'int'],
             'delivery_minimum_cents' => ['12500', 'int'],
             'extended_delivery_minimum_cents' => ['25000', 'int'],

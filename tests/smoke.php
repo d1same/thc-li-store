@@ -19,6 +19,8 @@ use App\Store;
 use App\EmailService;
 use App\CustomerImportService;
 use App\Notification;
+use App\RateLimiter;
+use App\Totp;
 
 $pdo = Database::pdo();
 if ((int) $pdo->query("SELECT COUNT(*) FROM users WHERE role='owner'")->fetchColumn() === 0) {
@@ -188,6 +190,25 @@ try { CustomerImportService::preview(['error' => UPLOAD_ERR_OK, 'tmp_name' => $u
 catch (RuntimeException) { $unsafeRejected = true; }
 @unlink($unsafeCsv);
 
+// Security hardening: deterministic TOTP, encrypted secrets, fixed-window abuse limits and forced staff password change.
+$rfcSecret = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+$totpMatches = Totp::verify($rfcSecret, '287082', 59);
+$encryptedMfaSecret = Totp::encryptSecret($rfcSecret);
+$mfaRoundTrip = Totp::decryptSecret($encryptedMfaSecret) === $rfcSecret;
+$mfaStartRejectedWithoutPassword = false;
+$ownerUser = Database::one('SELECT * FROM users WHERE id=?', [$ownerId]);
+try {
+    Auth::beginMfa($ownerUser, 'not-the-current-password');
+} catch (RuntimeException) {
+    $mfaStartRejectedWithoutPassword = true;
+}
+$mfaEnrollmentSecret = Auth::beginMfa($ownerUser, 'TestingOnly123!');
+RateLimiter::clear('test.limit', 'security-smoke');
+$limitOne = RateLimiter::hit('test.limit', 'security-smoke', 3, 60, 60);
+$limitTwo = RateLimiter::hit('test.limit', 'security-smoke', 3, 60, 60);
+$limitThree = RateLimiter::hit('test.limit', 'security-smoke', 3, 60, 60);
+RateLimiter::clear('test.limit', 'security-smoke');
+
 $checks = [
     'products seeded' => (int) $pdo->query('SELECT COUNT(*) FROM products')->fetchColumn() >= 40,
     'variants seeded' => (int) $pdo->query('SELECT COUNT(*) FROM product_variants')->fetchColumn() >= 40,
@@ -202,6 +223,10 @@ $checks = [
     'POS migration applied' => in_array('order_source', array_column(Database::all('PRAGMA table_info(orders)'), 'name'), true),
     'customer reporting migration applied' => in_array('customer_id', array_column(Database::all('PRAGMA table_info(orders)'), 'name'), true),
     'staff POS permission enforced' => Auth::can('pos.access', $posStaff) && !Auth::can('products.edit', $posStaff),
+    'temporary staff password change required' => (int) $posStaff['must_change_password'] === 1,
+    'security migration applied' => in_array('auth_version', array_column(Database::all('PRAGMA table_info(users)'), 'name'), true) && (int) $pdo->query("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='rate_limits'")->fetchColumn() === 1 && (int) $pdo->query("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_users_single_owner'")->fetchColumn() === 1,
+    'TOTP verification and enrollment protection work' => $totpMatches && $mfaRoundTrip && $mfaStartRejectedWithoutPassword && strlen($mfaEnrollmentSecret) === 32,
+    'abuse limiter blocks at configured threshold' => $limitOne['allowed'] && $limitTwo['allowed'] && !$limitThree['allowed'] && $limitThree['retry_after'] > 0,
     'POS works while online ordering paused' => $posOrder !== null && $posOrder['order_source'] === 'pos',
     'POS anonymous cash sale completed' => $posOrder['status'] === 'completed' && $posOrder['payment_status'] === 'paid' && $posOrder['payment_method'] === 'cash' && $posOrder['customer_name'] === 'Walk-in customer',
     'POS tax snapshot calculated' => (int) $posOrder['subtotal_cents'] === 2000 && (int) $posOrder['tax_cents'] === 178 && (int) $posOrder['total_cents'] === 2178,

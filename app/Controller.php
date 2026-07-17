@@ -44,11 +44,49 @@ final class Controller
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             verify_csrf();
             if (Auth::attempt((string) ($_POST['email'] ?? ''), (string) ($_POST['password'] ?? ''))) {
+                if (Auth::mfaPendingUser()) {
+                    redirect('login/mfa');
+                }
+                if (Auth::needsSecuritySetup()) {
+                    redirect('account/security');
+                }
                 redirect(Auth::isStaff() ? 'admin' : 'account');
             }
-            flash('error', 'The email or password was not recognized.');
+            if (Auth::retryAfter() > 0) {
+                http_response_code(429);
+                header('Retry-After: ' . Auth::retryAfter());
+                flash('error', 'Too many sign-in attempts. Wait a few minutes before trying again.');
+            } else {
+                flash('error', 'The email or password was not recognized.');
+            }
         }
         render('auth/login', ['title' => 'Sign in']);
+    }
+
+    public static function loginMfa(): void
+    {
+        $pending = Auth::mfaPendingUser();
+        if (!$pending) {
+            flash('warning', 'Your verification session expired. Sign in again.');
+            redirect('login');
+        }
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            verify_csrf();
+            if (Auth::completeMfa((string) ($_POST['code'] ?? ''))) {
+                if (Auth::needsSecuritySetup()) {
+                    redirect('account/security');
+                }
+                redirect(Auth::isStaff() ? 'admin' : 'account');
+            }
+            if (Auth::retryAfter() > 0) {
+                http_response_code(429);
+                header('Retry-After: ' . Auth::retryAfter());
+                flash('error', 'Too many verification attempts. Wait before trying again.');
+            } else {
+                flash('error', 'That verification code was not accepted.');
+            }
+        }
+        render('auth/mfa', ['title' => 'Security verification', 'pending' => $pending]);
     }
 
     public static function register(): void
@@ -59,6 +97,19 @@ final class Controller
         }
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             verify_csrf();
+            if (trim((string) ($_POST['website'] ?? '')) !== '') {
+                http_response_code(202);
+                render('auth/register', ['title' => 'Create account']);
+                return;
+            }
+            $limit = RateLimiter::hit('register.ip', RateLimiter::ip(), 5, 3600, 3600);
+            if (!$limit['allowed']) {
+                http_response_code(429);
+                header('Retry-After: ' . (int) $limit['retry_after']);
+                flash('error', 'Too many account attempts from this connection. Try again later.');
+                render('auth/register', ['title' => 'Create account']);
+                return;
+            }
             $name = trim((string) ($_POST['name'] ?? ''));
             $email = trim((string) ($_POST['email'] ?? ''));
             $password = (string) ($_POST['password'] ?? '');
@@ -91,6 +142,78 @@ final class Controller
         $addresses = Database::all('SELECT * FROM addresses WHERE user_id=? ORDER BY created_at DESC', [$user['id']]);
         $favorites = Database::all('SELECT p.*,c.name category_name,c.slug category_slug,MIN(COALESCE(v.sale_price_cents,v.price_cents)) from_price FROM favorites f JOIN products p ON p.id=f.product_id JOIN categories c ON c.id=p.category_id JOIN product_variants v ON v.product_id=p.id WHERE f.user_id=? GROUP BY p.id ORDER BY f.created_at DESC', [$user['id']]);
         render('account/index', ['title' => 'Your account', 'orders' => $orders, 'addresses' => $addresses, 'favorites' => $favorites]);
+    }
+
+    public static function accountSecurity(): void
+    {
+        $user = Auth::requireUser();
+        $secret = Auth::pendingMfaSecret($user);
+        $recoveryCodes = $_SESSION['mfa_recovery_codes'] ?? [];
+        unset($_SESSION['mfa_recovery_codes']);
+        render('account/security', [
+            'title' => 'Account security',
+            'securityUser' => $user,
+            'pendingSecret' => $secret,
+            'provisioningUri' => $secret ? Totp::provisioningUri($secret, (string) $user['email'], (string) Store::setting('store_name', 'THC LI')) : null,
+            'recoveryCodes' => is_array($recoveryCodes) ? $recoveryCodes : [],
+        ]);
+    }
+
+    public static function accountSecurityPassword(): void
+    {
+        $user = Auth::requireUser();
+        verify_csrf();
+        try {
+            Auth::changePassword($user, (string) ($_POST['current_password'] ?? ''), (string) ($_POST['new_password'] ?? ''));
+            flash('success', 'Your password was changed and other sessions were invalidated.');
+        } catch (RuntimeException $error) {
+            flash('error', $error->getMessage());
+        }
+        redirect('account/security');
+    }
+
+    public static function accountSecurityMfaStart(): void
+    {
+        $user = Auth::requireUser();
+        verify_csrf();
+        try {
+            Auth::beginMfa($user, (string) ($_POST['password'] ?? ''));
+            flash('success', 'Authenticator setup started. Enter the key in your app, then confirm a code.');
+        } catch (RuntimeException $error) {
+            flash('error', $error->getMessage());
+        }
+        redirect('account/security');
+    }
+
+    public static function accountSecurityMfaConfirm(): void
+    {
+        $user = Auth::requireUser();
+        verify_csrf();
+        $limit = RateLimiter::hit('mfa.enroll', (string) $user['id'], 8, 900, 900);
+        if (!$limit['allowed']) {
+            flash('error', 'Too many setup attempts. Wait before trying again.');
+            redirect('account/security');
+        }
+        try {
+            $_SESSION['mfa_recovery_codes'] = Auth::confirmMfa($user, (string) ($_POST['code'] ?? ''));
+            flash('success', 'Two-factor authentication is active. Save the recovery codes now.');
+        } catch (RuntimeException $error) {
+            flash('error', $error->getMessage());
+        }
+        redirect('account/security');
+    }
+
+    public static function accountSecurityMfaDisable(): void
+    {
+        $user = Auth::requireUser();
+        verify_csrf();
+        try {
+            Auth::disableMfa($user, (string) ($_POST['password'] ?? ''), (string) ($_POST['code'] ?? ''));
+            flash('success', 'Two-factor authentication was disabled.');
+        } catch (RuntimeException $error) {
+            flash('error', $error->getMessage());
+        }
+        redirect('account/security');
     }
 
     public static function accountOrder(string $id): void
@@ -135,6 +258,23 @@ final class Controller
         $user = Auth::user();
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             verify_csrf();
+            if (trim((string) ($_POST['website'] ?? '')) !== '') {
+                http_response_code(202);
+                render('checkout', ['title' => 'Checkout', 'user' => $user]);
+                return;
+            }
+            $ipLimit = RateLimiter::hit('checkout.ip.15m', RateLimiter::ip(), 8, 900, 1800);
+            $dailyLimit = RateLimiter::hit('checkout.ip.day', RateLimiter::ip(), 30, 86400, 86400);
+            $contact = strtolower(trim((string) ($_POST['customer_email'] ?? ''))) . '|' . preg_replace('/\D+/', '', (string) ($_POST['customer_phone'] ?? ''));
+            $contactLimit = RateLimiter::hit('checkout.contact', $contact, 5, 3600, 3600);
+            if (!$ipLimit['allowed'] || !$dailyLimit['allowed'] || !$contactLimit['allowed']) {
+                $retry = max((int) $ipLimit['retry_after'], (int) $dailyLimit['retry_after'], (int) $contactLimit['retry_after']);
+                http_response_code(429);
+                header('Retry-After: ' . max(1, $retry));
+                flash('error', 'Too many order attempts were received. Wait before trying again or contact the store.');
+                render('checkout', ['title' => 'Checkout', 'user' => $user]);
+                return;
+            }
             try {
                 $order = OrderService::create($_POST, $user);
                 $_SESSION['last_order_id'] = $order['id'];
@@ -172,9 +312,24 @@ final class Controller
         }
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             verify_csrf();
+            $limit = RateLimiter::hit('setup.ip', RateLimiter::ip(), 5, 3600, 3600);
+            if (!$limit['allowed']) {
+                http_response_code(429);
+                header('Retry-After: ' . (int) $limit['retry_after']);
+                flash('error', 'Too many setup attempts. Wait before trying again.');
+                render('auth/setup', ['title' => 'Set up owner account', 'setupReady' => true]);
+                return;
+            }
+            $setupToken = (string) getenv('APP_SETUP_TOKEN');
+            if (strlen($setupToken) < 32 || !hash_equals($setupToken, (string) ($_POST['setup_token'] ?? ''))) {
+                Audit::record('setup.token_rejected', 'setup');
+                flash('error', 'The one-time setup key was not accepted.');
+                render('auth/setup', ['title' => 'Set up owner account', 'setupReady' => strlen($setupToken) >= 32]);
+                return;
+            }
             $password = (string) ($_POST['password'] ?? '');
-            if (strlen($password) < 12 || !filter_var($_POST['email'] ?? '', FILTER_VALIDATE_EMAIL)) {
-                flash('error', 'Use a valid email and a password of at least 12 characters.');
+            if (trim((string) ($_POST['name'] ?? '')) === '' || strlen($password) < 12 || !filter_var($_POST['email'] ?? '', FILTER_VALIDATE_EMAIL)) {
+                flash('error', 'Use your name, a valid email and a password of at least 12 characters.');
             } else {
                 $id = Auth::register((string) $_POST['name'], (string) $_POST['email'], (string) ($_POST['phone'] ?? ''), $password, 'owner');
                 Auth::loginById($id);
@@ -182,7 +337,7 @@ final class Controller
                 redirect('admin');
             }
         }
-        render('auth/setup', ['title' => 'Set up owner account']);
+        render('auth/setup', ['title' => 'Set up owner account', 'setupReady' => strlen((string) getenv('APP_SETUP_TOKEN')) >= 32]);
     }
 
     public static function admin(): void
@@ -204,6 +359,35 @@ final class Controller
             ],
             'orders' => $canViewOrders ? Database::all('SELECT * FROM orders ORDER BY created_at DESC LIMIT 8') : [],
             'sales' => $canViewReports ? ReportingService::report(['range' => 'today'])['kpis'] : null,
+        ]);
+    }
+
+    public static function adminSecurity(): void
+    {
+        $owner = Auth::requireStaff();
+        if ($owner['role'] !== 'owner') {
+            http_response_code(403);
+            exit('Only the owner can view the security center.');
+        }
+        $configuredDb = (string) (getenv('DB_PATH') ?: APP_ROOT . '/storage/shop.sqlite');
+        $publicRoot = str_replace('\\', '/', realpath(APP_ROOT . '/public') ?: APP_ROOT . '/public');
+        $dbPath = str_replace('\\', '/', $configuredDb);
+        if (!preg_match('/^(?:[A-Za-z]:[\\\\\/]|\/)/', $configuredDb)) {
+            $dbPath = str_replace('\\', '/', APP_ROOT . '/' . ltrim($configuredDb, './'));
+        }
+        $checks = [
+            'Production mode' => (string) getenv('APP_ENV') === 'production',
+            'Strong APP_KEY' => strlen((string) getenv('APP_KEY')) >= 32,
+            'HTTPS request' => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
+            'Database outside public folder' => !str_starts_with($dbPath, $publicRoot . '/'),
+            'Staff MFA requirement enabled' => Store::setting('staff_mfa_required', false) === true,
+            'Owner MFA enabled' => !empty($owner['mfa_enabled_at']),
+        ];
+        render('admin/security', [
+            'title' => 'Security center',
+            'checks' => $checks,
+            'staffSecurity' => Database::all("SELECT id,name,email,role,status,must_change_password,mfa_enabled_at,last_login_at FROM users WHERE role IN ('owner','manager','staff') ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'manager' THEN 1 ELSE 2 END,name"),
+            'events' => Database::all("SELECT a.*,u.name user_name FROM audit_events a LEFT JOIN users u ON u.id=a.user_id WHERE a.action LIKE 'auth.%' OR a.action LIKE 'setup.%' OR a.action LIKE 'staff.%' OR a.action='customers.exported' ORDER BY a.id DESC LIMIT 100"),
         ]);
     }
 
@@ -287,6 +471,13 @@ final class Controller
             echo json_encode(['customers' => []]);
             return;
         }
+        $limit = RateLimiter::hit('customer.search', (string) $staff['id'], 60, 60, 60);
+        if (!$limit['allowed']) {
+            http_response_code(429);
+            header('Retry-After: ' . (int) $limit['retry_after']);
+            echo json_encode(['customers' => [], 'error' => 'rate_limited']);
+            return;
+        }
         CustomerService::syncDirectory(300);
         $search = mb_substr(trim((string) ($_GET['q'] ?? '')), 0, 80);
         if (mb_strlen($search) < 2) {
@@ -359,8 +550,14 @@ final class Controller
 
     public static function adminCustomersExport(): void
     {
-        Auth::requirePermission('customers.export');
+        $user = Auth::requirePermission('customers.export');
         verify_csrf();
+        $limit = RateLimiter::hit('customers.export', (string) $user['id'], 5, 3600, 3600);
+        if (!$limit['allowed']) {
+            http_response_code(429);
+            header('Retry-After: ' . (int) $limit['retry_after']);
+            exit('Too many customer exports. Try again later.');
+        }
         CustomerService::syncDirectory(5000);
         $scope = ($_POST['scope'] ?? '') === 'marketing' ? 'marketing' : 'all';
         $where = $scope === 'marketing' ? 'WHERE c.marketing_opt_in=1 AND c.status=\'active\'' : '';
@@ -403,6 +600,14 @@ final class Controller
         $preview = null;
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             verify_csrf();
+            $limit = RateLimiter::hit('customers.import', (string) $user['id'], 10, 3600, 3600);
+            if (!$limit['allowed']) {
+                http_response_code(429);
+                header('Retry-After: ' . (int) $limit['retry_after']);
+                flash('error', 'Too many import attempts. Try again later.');
+                render('admin/customer-import', ['title' => 'Import customers', 'preview' => null]);
+                return;
+            }
             try {
                 $preview = CustomerImportService::preview($_FILES['customer_file'] ?? [], (int) $user['id']);
                 self::audit('customers.import.previewed', 'customer_import', (string) $preview['job_id'], ['rows' => $preview['total']]);
@@ -662,7 +867,7 @@ final class Controller
 
     public static function adminPosReceipt(string $id): void
     {
-        Auth::requirePermission('pos.access');
+        $staff = Auth::requirePermission('pos.access');
         $order = Database::one(
             'SELECT o.*,u.name created_by_name FROM orders o LEFT JOIN users u ON u.id=o.created_by_user_id WHERE o.id=? AND o.order_source=?',
             [(int) $id, 'pos']
@@ -671,6 +876,10 @@ final class Controller
             http_response_code(404);
             render('errors/404', ['title' => 'Receipt not found']);
             return;
+        }
+        if (!Auth::can('orders.view', $staff) && (int) ($order['created_by_user_id'] ?? 0) !== (int) $staff['id']) {
+            http_response_code(403);
+            exit('You may only view receipts for sales completed with your account.');
         }
         render('admin/pos-receipt', [
             'title' => 'Receipt ' . $order['order_number'],
@@ -694,7 +903,9 @@ final class Controller
             Auth::requirePermission('orders.manage');
             verify_csrf();
             $statuses=['awaiting_confirmation','confirmed','preparing','ready','out_for_delivery','completed','cancelled'];
+            $paymentStatuses=['pending','due','paid','failed','refunded','cancelled'];
             $status=in_array($_POST['status']??'', $statuses, true)?$_POST['status']:$order['status'];
+            $paymentStatus=in_array($_POST['payment_status']??'', $paymentStatuses, true)?$_POST['payment_status']:$order['payment_status'];
             try {
                 if ($order['status'] === 'cancelled' && $status !== 'cancelled') {
                     throw new RuntimeException('Cancelled orders are final because their inventory has already been restored.');
@@ -702,7 +913,7 @@ final class Controller
                 $pdo = Database::pdo();
                 $pdo->beginTransaction();
                 try {
-                    Database::execute('UPDATE orders SET status=?,payment_status=?,staff_notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?', [$status,$_POST['payment_status'],trim((string)$_POST['staff_notes']),$order['id']]);
+                    Database::execute('UPDATE orders SET status=?,payment_status=?,staff_notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?', [$status,$paymentStatus,mb_substr(trim((string)($_POST['staff_notes'] ?? '')),0,2000),$order['id']]);
                     if ($status === 'cancelled' && $order['status'] !== 'cancelled') {
                         OrderService::releaseInventory((int) $order['id']);
                     }
@@ -805,6 +1016,11 @@ final class Controller
     public static function adminEmailCampaignApprove(string $id): void
     {
         $user = Auth::requirePermission('campaigns.manage'); verify_csrf();
+        $limit = RateLimiter::hit('campaign.approve', (string) $user['id'], 10, 3600, 3600);
+        if (!$limit['allowed']) {
+            flash('error', 'Too many campaign approval attempts. Try again later.');
+            redirect('admin/email');
+        }
         try {
             $count = CampaignService::approve((int) $id, (int) $user['id']);
             self::audit('campaign.approved', 'email_campaign', $id, ['recipients' => $count]);
@@ -917,9 +1133,21 @@ final class Controller
         }
         $role = in_array($_POST['role'] ?? '', ['staff','manager'], true) ? (string) $_POST['role'] : 'staff';
         $status = ($_POST['status'] ?? '') === 'disabled' ? 'disabled' : 'active';
-        Database::execute('UPDATE users SET role=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?', [$role,$status,(int)$member['id']]);
+        $temporaryPassword = (string) ($_POST['temporary_password'] ?? '');
+        if ($temporaryPassword !== '' && (strlen($temporaryPassword) < 12 || strlen($temporaryPassword) > 200)) {
+            flash('error', 'A reset password must be at least 12 characters.');
+            redirect('admin/staff');
+        }
+        if ($temporaryPassword !== '') {
+            Database::execute(
+                'UPDATE users SET role=?,status=?,password_hash=?,must_change_password=1,password_changed_at=CURRENT_TIMESTAMP,auth_version=auth_version+1,updated_at=CURRENT_TIMESTAMP WHERE id=?',
+                [$role,$status,password_hash($temporaryPassword,PASSWORD_DEFAULT),(int)$member['id']]
+            );
+        } else {
+            Database::execute('UPDATE users SET role=?,status=?,auth_version=auth_version+1,updated_at=CURRENT_TIMESTAMP WHERE id=?', [$role,$status,(int)$member['id']]);
+        }
         Auth::syncPermissions((int) $member['id'], self::submittedPermissions());
-        self::audit('staff.permissions.updated', 'user', (string) $member['id'], ['role'=>$role,'status'=>$status]);
+        self::audit('staff.permissions.updated', 'user', (string) $member['id'], ['role'=>$role,'status'=>$status,'password_reset'=>$temporaryPassword!=='']);
         flash('success', 'Staff access updated.');
         redirect('admin/staff');
     }
@@ -931,7 +1159,12 @@ final class Controller
         try { Database::pdo()->query('SELECT 1')->fetchColumn(); $checks['database']=true; } catch (\Throwable) {}
         $ok=$checks['sqlite']&&$checks['database']&&$checks['uploads_writable'];
         http_response_code($ok?200:503);
-        echo json_encode(['ok'=>$ok,'service'=>'local-shop','checks'=>$checks], JSON_PRETTY_PRINT);
+        $payload=['ok'=>$ok,'service'=>'thc-li'];
+        $user=Auth::user();
+        if ($user && $user['role']==='owner') {
+            $payload['checks']=$checks;
+        }
+        echo json_encode($payload, JSON_PRETTY_PRINT);
     }
 
     private static function settingsSchema(): array
@@ -941,7 +1174,7 @@ final class Controller
             'ordering_enabled'=>'bool','pickup_enabled'=>'bool','delivery_enabled'=>'bool','guest_checkout_enabled'=>'bool','registration_enabled'=>'bool','manual_confirmation'=>'bool','same_day_enabled'=>'bool','scheduled_enabled'=>'bool',
             'pay_at_pickup_enabled'=>'bool','manual_prepaid_enabled'=>'bool','pickup_minimum_cents'=>'int','delivery_minimum_cents'=>'int','extended_delivery_minimum_cents'=>'int','delivery_fee_cents'=>'int','service_areas'=>'string','extended_areas'=>'string','pickup_address'=>'string',
             'pos_enabled'=>'bool','pos_cash_enabled'=>'bool','pos_external_card_enabled'=>'bool','pos_tax_enabled'=>'bool','pos_tax_rate'=>'string','pos_print_receipt_enabled'=>'bool','pos_email_receipt_enabled'=>'bool','pos_manual_discount_enabled'=>'bool','pos_max_discount_percent'=>'int','customer_capture_enabled'=>'bool','marketing_opt_in_enabled'=>'bool',
-            'email_enabled'=>'bool','email_order_confirmation_enabled'=>'bool','email_from_name'=>'string','email_from_address'=>'string','email_reply_to'=>'string','order_notification_email'=>'string','email_dns_verified'=>'bool','marketing_campaigns_enabled'=>'bool','marketing_from_name'=>'string','marketing_from_address'=>'string','marketing_reply_to'=>'string','marketing_physical_address'=>'string','marketing_hopeline'=>'string','marketing_campaign_day'=>'int',
+            'email_enabled'=>'bool','email_order_confirmation_enabled'=>'bool','email_from_name'=>'string','email_from_address'=>'string','email_reply_to'=>'string','order_notification_email'=>'string','email_dns_verified'=>'bool','marketing_campaigns_enabled'=>'bool','marketing_from_name'=>'string','marketing_from_address'=>'string','marketing_reply_to'=>'string','marketing_physical_address'=>'string','marketing_hopeline'=>'string','marketing_campaign_day'=>'int','staff_mfa_required'=>'bool',
         ];
     }
 
@@ -1047,8 +1280,10 @@ final class Controller
         if (!isset($extensions[$mime])) { throw new RuntimeException('Use a JPG, PNG, or WebP image.'); }
         $name=bin2hex(random_bytes(12)).'.'.$extensions[$mime];
         $directory=APP_ROOT.'/public/uploads/products';
-        if(!is_dir($directory)){mkdir($directory,0770,true);}
+        if(!is_dir($directory)){mkdir($directory,0750,true);}
+        @chmod($directory, 0750);
         if(!move_uploaded_file($file['tmp_name'],$directory.'/'.$name)){throw new RuntimeException('Unable to save the image.');}
+        @chmod($directory.'/'.$name, 0640);
         return 'uploads/products/'.$name;
     }
 
@@ -1062,6 +1297,6 @@ final class Controller
 
     private static function audit(string $action,string $type,string $id,array $details=[]): void
     {
-        Database::execute('INSERT INTO audit_events (user_id,action,entity_type,entity_id,details,ip_address) VALUES (?,?,?,?,?,?)', [Auth::user()['id']??null,$action,$type,$id,json_encode($details),$_SERVER['REMOTE_ADDR']??'']);
+        Audit::record($action,$type,$id,$details,Auth::user()['id']??null);
     }
 }

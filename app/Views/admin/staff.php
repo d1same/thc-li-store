@@ -7,16 +7,17 @@
     <?php foreach ($staff as $member): $memberPermissions = $staffPermissions[(int) $member['id']] ?? []; ?>
       <?php if ($member['role'] === 'owner'): ?>
         <article class="admin-panel staff-access-card owner-card">
-          <div class="staff-card-head"><span class="order-icon"><i data-lucide="shield-check"></i></span><div><strong><?= e($member['name']) ?></strong><small><?= e($member['email']) ?></small></div><span class="status-pill">Owner</span></div>
+          <div class="staff-card-head"><span class="order-icon"><i data-lucide="shield-check"></i></span><div><strong><?= e($member['name']) ?></strong><small><?= e($member['email']) ?> · <?= $member['mfa_enabled_at']?'MFA enabled':'MFA not enabled' ?></small></div><span class="status-pill">Owner</span></div>
           <p>The owner always has full access and cannot be restricted by staff checkboxes.</p>
         </article>
       <?php else: ?>
         <form method="post" action="<?= url('admin/staff/' . $member['id']) ?>" class="admin-panel staff-access-card">
           <?= csrf_field() ?>
-          <div class="staff-card-head"><span class="order-icon"><i data-lucide="user-round-cog"></i></span><div><strong><?= e($member['name']) ?></strong><small><?= e($member['email']) ?></small></div><span class="status-pill status-<?= e($member['status']) ?>"><?= e(ucfirst($member['status'])) ?></span></div>
+          <div class="staff-card-head"><span class="order-icon"><i data-lucide="user-round-cog"></i></span><div><strong><?= e($member['name']) ?></strong><small><?= e($member['email']) ?> · <?= $member['mfa_enabled_at']?'MFA enabled':'MFA not enabled' ?><?= $member['must_change_password']?' · password change required':'' ?></small></div><span class="status-pill status-<?= e($member['status']) ?>"><?= e(ucfirst($member['status'])) ?></span></div>
           <div class="staff-meta-fields">
             <label>Role<select name="role"><option value="staff" <?= $member['role'] === 'staff' ? 'selected' : '' ?>>Staff</option><option value="manager" <?= $member['role'] === 'manager' ? 'selected' : '' ?>>Manager</option></select></label>
             <label>Status<select name="status"><option value="active" <?= $member['status'] === 'active' ? 'selected' : '' ?>>Active</option><option value="disabled" <?= $member['status'] === 'disabled' ? 'selected' : '' ?>>Disabled</option></select></label>
+            <label class="full">Reset temporary password <small>Optional; at least 12 characters. Existing sessions will close.</small><input type="password" name="temporary_password" minlength="12" maxlength="200" autocomplete="new-password"></label>
           </div>
           <fieldset class="permission-fieldset"><legend>Allowed actions</legend><div class="permission-grid">
             <?php foreach ($permissions as $key => $label): ?><label class="permission-check"><input type="checkbox" name="permissions[]" value="<?= e($key) ?>" <?= isset($memberPermissions[$key]) ? 'checked' : '' ?>><span><i data-lucide="check"></i><?= e($label) ?></span></label><?php endforeach; ?>

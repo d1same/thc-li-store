@@ -1,0 +1,18 @@
+rules:
+  - id: thc-li-dangerous-php-execution
+    languages: [php]
+    severity: ERROR
+    message: Dynamic PHP or operating-system execution is not allowed in this application.
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: exec(...)
+      - pattern: shell_exec(...)
+      - pattern: system(...)
+      - pattern: passthru(...)
+      - pattern: proc_open(...)
+      - pattern: popen(...)
+  - id: thc-li-unsafe-unserialize
+    languages: [php]
+    severity: ERROR
+    message: Do not deserialize untrusted PHP objects. Use JSON with schema validation.
+    pattern: unserialize(...)

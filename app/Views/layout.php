@@ -11,10 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="<?= asset('app.css') ?>">
-  <script>window.SHOP={base:<?= json_encode(rtrim(url(''), '/')) ?>,csrf:<?= json_encode(csrf_token()) ?>};</script>
-  <?php if ($adminArea): ?><script>try{if(localStorage.getItem('thcli_admin_sidebar')==='collapsed')document.documentElement.classList.add('admin-nav-collapsed')}catch{}</script><?php endif; ?>
+  <meta id="shop-config" data-json="<?= e(json_encode(['base'=>rtrim(url(''),'/'),'csrf'=>csrf_token(),'admin'=>$adminArea], JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_UNESCAPED_SLASHES)) ?>">
   <script defer src="<?= asset('app.js') ?>"></script>
-  <script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+  <script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" integrity="sha384-uTYyvsSSUZeaPhb5RbKlQa0zY/WpX/QHfvg2mczXyBQOpkWPEDy9lczyp+w7SKXu" crossorigin="anonymous"></script>
 </head>
 <body class="<?= $adminArea ? 'admin-body' : '' ?>">
   <?php if (!$adminArea): ?>
@@ -57,6 +56,7 @@
         <?php if (can('promotions.manage')): ?><a href="<?= url('admin/promotions') ?>" title="Promotions"><i data-lucide="badge-percent"></i><span>Promotions</span></a><?php endif; ?>
         <?php if (can('settings.manage')): ?><a href="<?= url('admin/settings') ?>" title="Settings"><i data-lucide="sliders-horizontal"></i><span>Settings</span></a><?php endif; ?>
         <?php if (($user['role'] ?? '') === 'owner'): ?><a href="<?= url('admin/staff') ?>" title="Staff"><i data-lucide="users-round"></i><span>Staff</span></a><?php endif; ?>
+        <?php if (($user['role'] ?? '') === 'owner'): ?><a href="<?= url('admin/security') ?>" title="Security"><i data-lucide="shield-check"></i><span>Security</span></a><?php endif; ?>
         <a href="<?= url('') ?>" title="View shop"><i data-lucide="store"></i><span>View shop</span></a>
         <form method="post" action="<?= url('logout') ?>"><?= csrf_field() ?><button type="submit" title="Sign out"><i data-lucide="log-out"></i><span>Sign out</span></button></form>
       </nav>

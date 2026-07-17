@@ -177,12 +177,15 @@ final class CustomerImportService
         $key = (string) getenv('APP_KEY');
         if (strlen($key) < 32) throw new RuntimeException('Set a random APP_KEY of at least 32 characters before importing private customer data.');
         $dir = APP_ROOT . '/storage/imports';
-        if (!is_dir($dir)) mkdir($dir, 0770, true);
+        if (!is_dir($dir)) mkdir($dir, 0700, true);
+        @chmod($dir, 0700);
         $token = bin2hex(random_bytes(24));
         $iv = random_bytes(12); $tag = '';
         $cipher = openssl_encrypt($payload, 'aes-256-gcm', hash('sha256', $key, true), OPENSSL_RAW_DATA, $iv, $tag);
         if ($cipher === false) throw new RuntimeException('Private import staging could not be encrypted.');
-        file_put_contents($dir . '/' . $token . '.dat', $iv . $tag . $cipher, LOCK_EX);
+        $path = $dir . '/' . $token . '.dat';
+        file_put_contents($path, $iv . $tag . $cipher, LOCK_EX);
+        @chmod($path, 0600);
         return $token;
     }
 

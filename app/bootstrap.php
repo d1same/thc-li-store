@@ -31,7 +31,30 @@ spl_autoload_register(static function (string $class): void {
 
 require __DIR__ . '/helpers.php';
 
+$production = (string) (getenv('APP_ENV') ?: 'production') === 'production';
+if ($production) {
+    ini_set('display_errors', '0');
+    ini_set('display_startup_errors', '0');
+    ini_set('log_errors', '1');
+    ini_set('zend.exception_ignore_args', '1');
+    if (PHP_SAPI !== 'cli') {
+        set_exception_handler(static function (Throwable $error): void {
+            error_log(sprintf('[THC-LI] %s in %s:%d', $error->getMessage(), $error->getFile(), $error->getLine()));
+            if (!headers_sent()) {
+                http_response_code(500);
+                header('Content-Type: text/plain; charset=UTF-8');
+                header('Cache-Control: no-store');
+            }
+            exit('The application encountered an unexpected error. Please try again later.');
+        });
+    }
+}
+
 $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+ini_set('session.use_strict_mode', '1');
+ini_set('session.use_only_cookies', '1');
+ini_set('session.cookie_httponly', '1');
+ini_set('session.cookie_samesite', 'Lax');
 session_name('localshop_session');
 session_set_cookie_params([
     'lifetime' => 0,
@@ -43,11 +66,15 @@ session_set_cookie_params([
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
 }
+if (PHP_SAPI !== 'cli') {
+    header_remove('X-Powered-By');
+}
 
 date_default_timezone_set('America/New_York');
 
 \App\Database::boot();
 \App\Migration::run();
+\App\Auth::enforceSessionPolicy();
 $configuredTimezone = (string) \App\Store::setting('report_timezone', 'America/New_York');
 try {
     date_default_timezone_set((new DateTimeZone($configuredTimezone))->getName());

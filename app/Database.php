@@ -20,8 +20,9 @@ final class Database
             : APP_ROOT . '/' . ltrim($configured, './');
         $directory = dirname($path);
         if (!is_dir($directory)) {
-            mkdir($directory, 0770, true);
+            mkdir($directory, 0700, true);
         }
+        @chmod($directory, 0700);
         self::$pdo = new PDO('sqlite:' . $path, null, null, [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
@@ -30,6 +31,9 @@ final class Database
         self::$pdo->exec('PRAGMA foreign_keys = ON');
         self::$pdo->exec('PRAGMA journal_mode = WAL');
         self::$pdo->exec('PRAGMA busy_timeout = 5000');
+        @chmod($path, 0600);
+        @chmod($path . '-wal', 0600);
+        @chmod($path . '-shm', 0600);
     }
 
     public static function pdo(): PDO

@@ -12,10 +12,11 @@ A mobile-first PHP 8.3+ and SQLite storefront for a single local shop. It includ
 ## First run
 
 1. For the simplest cPanel preview, clone the repository directly into the domain or subdomain document root. The root front controller securely serves the application from `public/` automatically. Pointing the document root directly to `public/` remains supported for production.
-2. Confirm `storage/` and `public/uploads/` are writable by PHP.
-3. Visit `/setup` and create the first owner account.
-4. Open **Owner desk → Settings** and configure the license, service areas, pickup location, delivery minimums, hours, and approved payment methods.
-5. Verify `/health` returns `"ok": true`.
+2. Copy `.env.example` to `.env`, set a unique `APP_KEY`, and set a separate random `APP_SETUP_TOKEN` of at least 32 characters.
+3. Confirm `storage/` and `public/uploads/` are writable by PHP.
+4. Visit `/setup`, enter the one-time setup token, and create the first owner account. Remove `APP_SETUP_TOKEN` from `.env` after setup.
+5. Open **Owner desk → Settings** and configure the license, service areas, pickup location, delivery minimums, hours, and approved payment methods.
+6. Verify `/health` returns `"ok": true`.
 
 The SQLite database, runtime configuration, uploaded photos, and backups must not be committed to Git or overwritten during deployment.
 
@@ -50,12 +51,12 @@ The SQLite database, runtime configuration, uploaded photos, and backups must no
 
 - Receipt and order-confirmation emails enter a private queue. The order page shows queued, sent, or failed status, and authorized staff can resend a receipt.
 - New online-order alerts are sent to `orders@thc-li.com` with a secure Admin link; full delivery details remain in the authenticated order screen.
-- Run the queue every five minutes from cPanel Cron: `*/5 * * * * /usr/local/bin/php /home/CPANEL_USER/thcli/scripts/email-worker.php` (confirm the PHP path first).
+- Run the queue every five minutes from cPanel Cron: `*/5 * * * * /usr/bin/php /home/thclidave/public_html/scripts/email-worker.php` (confirm the PHP path first).
 - Use `receipts@thc-li.com` for receipts/order confirmations and `updates@thc-li.com` for approved product campaigns. Configure their sender names and reply-to addresses together with the physical business address, license, and SPF/DKIM/DMARC verification under **Owner desk → Settings** before enabling email.
 - Customer imports accept CSV files exported from Excel. Download the template, upload for an encrypted preview, and confirm after reviewing matches. The importer never replaces order history or existing private notes.
 - Marketing imports require an explicit yes plus a consent date and source. Unsubscribed contacts remain suppressed unless they later give new explicit consent.
 - Product campaigns are always drafts first. An authorized user must approve each campaign; only eligible opted-in customers are queued, and every message contains an unsubscribe link and compliance footer.
-- To create (but never send) a monthly draft automatically, run `0 9 * * * /usr/local/bin/php /home/CPANEL_USER/thcli/scripts/monthly-campaign-draft.php`. The configured day controls when the draft is created.
+- To create (but never send) a monthly draft automatically, run `0 9 * * * /usr/bin/php /home/thclidave/public_html/scripts/monthly-campaign-draft.php`. The configured day controls when the draft is created.
 
 Local PHP `mail()` is the initial cPanel transport. Confirm delivery with the host and set SPF, DKIM, and DMARC for the exact sending domain. A “sent” status records transport acceptance, not guaranteed inbox placement.
 
@@ -65,6 +66,17 @@ Local PHP `mail()` is the initial cPanel transport. Confirm delivery with the ho
 - In **Owner desk → Staff**, create staff or manager logins and choose their permissions with checkboxes.
 - POS access, sale approval, manual discounts, reports, customer viewing/editing/export, order management, product creation/editing/archiving, promotions, and settings are independently controlled.
 - Product removal is implemented as archiving so historical orders and receipts remain intact.
+
+## Security
+
+- Admin sessions expire after 30 minutes of inactivity or eight hours total, rotate periodically, and are invalidated when staff access or passwords change.
+- Login protection applies separate account and IP throttles. Registration, checkout, setup, customer lookup, imports, exports, and campaign approvals also have abuse limits with HTTP `429` responses.
+- Staff temporary passwords must be changed before Admin can be used. Owners can reset a staff password without learning the old one.
+- TOTP authenticator MFA and one-time recovery codes are available under **Account security**. Enroll the owner first, verify a fresh sign-in, then enable **Require MFA for all staff** in Settings.
+- POS-only staff can view only receipts for sales completed using their own account unless they also have `orders.view`.
+- The public health endpoint returns only service status. Detailed checks appear only to a signed-in owner.
+- Review account posture and recent authentication/security events under **Owner desk → Security**.
+- See `SECURITY.md` for cPanel permissions, owner activation, recovery, and incident-response guidance.
 
 ## Local preview
 
@@ -96,27 +108,27 @@ It points directly to this repository's `public/` directory and sets `APP_BASE=/
 
 1. Create a subdomain and leave its document root at the repository folder, such as `/home/USER/thcli`.
 2. Clone this repository into that folder with cPanel Git Version Control.
-3. Copy `.env.example` to `.env`, add a unique `APP_KEY`, and set the production URL.
-4. Make `storage/` and `public/uploads/` writable, then visit `/setup`.
+3. Copy `.env.example` to `.env`, add unique `APP_KEY` and `APP_SETUP_TOKEN` values, and set the production URL.
+4. Make `storage/` and `public/uploads/` writable, then visit `/setup`. Remove `APP_SETUP_TOKEN` after the owner is created.
 
 No file moving or `/public` document-root change is required for this preview setup.
 
-### Separate production release
+### THC LI direct-root production release
 
-The included `.cpanel.yml` is a starting point. Replace `CPANEL_USER` with the actual cPanel username and confirm the target paths before enabling deployment. Keep the repository checkout separate from the live application and persistent data.
+The live repository is checked out directly at `/home/thclidave/public_html`; its checkout is the application. A `.cpanel.yml` deployment recipe is intentionally not included because this layout updates in place.
 
 Recommended release process:
 
 1. Push a tested commit to GitHub.
 2. In cPanel Git Version Control, select **Update from Remote**.
-3. Review the commit, then select **Deploy HEAD Commit**.
-4. Visit `/health` and verify the owner dashboard.
-5. Keep the previous release until the verification passes.
+3. Do **not** select **Deploy HEAD Commit** for this direct-root layout.
+4. Visit `/health`, verify the owner dashboard, and open **Owner desk → Security**.
+5. Keep database and upload backups outside Git; Git updates must never overwrite `.env`, `storage`, or customer uploads.
 
 Create a nightly cPanel Cron Job using the account's PHP 8.3 binary and the private application path, for example:
 
 ```text
-15 3 * * * /usr/local/bin/php /home/CPANEL_USER/dispensary-app/scripts/backup.php
+15 3 * * * /usr/bin/php /home/thclidave/public_html/scripts/backup.php
 ```
 
 Confirm the actual PHP binary path in cPanel before enabling the job.

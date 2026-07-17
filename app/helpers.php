@@ -90,6 +90,10 @@ function can(string $permission): bool
 
 function render(string $view, array $data = []): void
 {
+    if (!headers_sent()) {
+        header('Content-Type: text/html; charset=UTF-8');
+        header('Cache-Control: no-store, private');
+    }
     extract($data, EXTR_SKIP);
     $viewFile = APP_ROOT . '/app/Views/' . $view . '.php';
     if (!is_file($viewFile)) {
