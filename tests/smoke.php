@@ -21,6 +21,7 @@ use App\CustomerImportService;
 use App\Notification;
 use App\RateLimiter;
 use App\Totp;
+use App\SecretBox;
 
 $pdo = Database::pdo();
 if ((int) $pdo->query("SELECT COUNT(*) FROM users WHERE role='owner'")->fetchColumn() === 0) {
@@ -39,6 +40,16 @@ if ((int) $pdo->query('SELECT COUNT(*) FROM orders')->fetchColumn() === 0) {
         'age_attestation' => '1',
     ], Database::one('SELECT * FROM users WHERE id=?', [$ownerId]));
 }
+
+// Homepage featured slots: exactly eight visible products, newest selection first,
+// and the oldest slot is released instead of leaving a misleading checked box.
+$featuredBefore = Database::all("SELECT id FROM products WHERE featured=1 ORDER BY id");
+$promotedProduct = Database::one("SELECT id,name FROM products WHERE status='active' AND featured=0 ORDER BY id LIMIT 1");
+Database::execute("UPDATE products SET featured=1,featured_at=datetime('now','+1 day') WHERE id=?", [(int) $promotedProduct['id']]);
+$displacedFeatured = Store::enforceFeaturedLimit((int) $promotedProduct['id'], 8);
+$featuredAfter = Store::products(['featured' => true]);
+$promotedAfter = Database::one('SELECT featured,featured_at FROM products WHERE id=?', [(int) $promotedProduct['id']]);
+$displacedAfter = $displacedFeatured ? Database::one('SELECT featured,featured_at FROM products WHERE id=?', [(int) $displacedFeatured[0]['id']]) : null;
 
 // Inventory lifecycle: reserve on order, auto-mark low stock, restore once on cancellation.
 $pdo->exec("DELETE FROM products WHERE slug='inventory-lifecycle-test'");
@@ -176,6 +187,19 @@ $stillSubscribed = Database::one('SELECT marketing_opt_in FROM customer_profiles
 $unsubscribed = $token ? EmailService::unsubscribe($token) : null;
 $receiptCustomerAfterUnsubscribe = Database::one('SELECT * FROM customer_profiles WHERE id=?', [(int) $receiptCustomer['id']]);
 
+// SMTP settings keep the mailbox password encrypted and participate in the
+// existing readiness gate without contacting an external service in tests.
+$smtpPlainText = 'Smtp-Test-Password-123!';
+$smtpEncrypted = SecretBox::encrypt($smtpPlainText, 'smtp-password');
+$smtpRoundTrip = SecretBox::decrypt($smtpEncrypted, 'smtp-password') === $smtpPlainText;
+Store::setSetting('email_transport', 'smtp');
+Store::setSetting('smtp_host', 'mail.example.test');
+Store::setSetting('smtp_port', 465, 'int');
+Store::setSetting('smtp_encryption', 'ssl');
+Store::setSetting('smtp_username', 'receipts@example.test');
+Store::setSetting('smtp_password_encrypted', $smtpEncrypted, 'secret');
+$smtpReadiness = EmailService::readiness(false);
+
 // Excel-compatible CSV preview, encrypted staging, safe matching, and formula rejection.
 $csv = tempnam(sys_get_temp_dir(), 'customer-import-');
 file_put_contents($csv, "name,email,phone,address1,address2,city,state,zip,marketing_opt_in,consent_date,consent_source,notes\nImported Customer,imported@example.test,6315550177,1 Main St,,Huntington,NY,11743,yes,2026-07-16,legacy signup,Imported new note\n");
@@ -209,10 +233,20 @@ $limitTwo = RateLimiter::hit('test.limit', 'security-smoke', 3, 60, 60);
 $limitThree = RateLimiter::hit('test.limit', 'security-smoke', 3, 60, 60);
 RateLimiter::clear('test.limit', 'security-smoke');
 
+$rootRewriteRules = (string) file_get_contents(APP_ROOT . '/.htaccess');
+$publicMediaRulePosition = strpos($rootRewriteRules, 'RewriteRule ^(assets|uploads)/(.*)$ public/$1/$2 [L,NC]');
+$privateUploadsRulePosition = strpos($rootRewriteRules, 'graphify-out|uploads)');
+$publicMediaRoutesBeforePrivateDeny = $publicMediaRulePosition !== false
+    && $privateUploadsRulePosition !== false
+    && $publicMediaRulePosition < $privateUploadsRulePosition;
+
 $checks = [
     'products seeded' => (int) $pdo->query('SELECT COUNT(*) FROM products')->fetchColumn() >= 40,
     'variants seeded' => (int) $pdo->query('SELECT COUNT(*) FROM product_variants')->fetchColumn() >= 40,
     'categories seeded' => (int) $pdo->query('SELECT COUNT(*) FROM categories')->fetchColumn() === 5,
+    'homepage starts with eight featured slots' => count($featuredBefore) === 8,
+    'newly featured product moves to first slot' => count($featuredAfter) === 8 && (int) $featuredAfter[0]['id'] === (int) $promotedProduct['id'] && (int) $promotedAfter['featured'] === 1 && !empty($promotedAfter['featured_at']),
+    'oldest featured slot is released' => count($displacedFeatured) === 1 && (int) ($displacedAfter['featured'] ?? 1) === 0 && ($displacedAfter['featured_at'] ?? null) === null,
     'owner setup works' => (int) $pdo->query("SELECT COUNT(*) FROM users WHERE role='owner'")->fetchColumn() === 1,
     'checkout created order' => (int) $pdo->query('SELECT COUNT(*) FROM orders')->fetchColumn() >= 1,
     'order snapshot exists' => (int) $pdo->query('SELECT COUNT(*) FROM order_items')->fetchColumn() >= 1,
@@ -242,6 +276,7 @@ $checks = [
     'pickup enabled' => Store::setting('pickup_enabled') === true,
     'online payment safely disabled' => Store::setting('online_payment_enabled') === false,
     'seed images available' => count($imageFiles) >= 40,
+    'cPanel root serves public product media before blocking private uploads' => $publicMediaRoutesBeforePrivateDeny,
     'promotion deletion fixture available' => $initialPromotionCount >= 1,
     'promotion seed initialized' => $promotionSeedInitialized,
     'deleted promotions stay deleted' => $promotionsRemainDeleted,
@@ -250,6 +285,8 @@ $checks = [
     'owner order notification uses dedicated inbox' => ($ownerOrderNotification['recipient_email'] ?? '') === 'owner-orders@example.test' && str_contains((string) ($ownerOrderNotification['body_text'] ?? ''), '/admin/orders/1'),
     'POS receipt queued before worker' => ($receiptBeforeWorker['receipt_email_status'] ?? '') === 'queued',
     'email worker records accepted delivery' => $workerResult['sent'] >= 1 && ($receiptAfterWorker['receipt_email_status'] ?? '') === 'sent' && !empty($receiptAfterWorker['receipt_email_last_sent_at']),
+    'SMTP password encrypted at rest' => $smtpEncrypted !== $smtpPlainText && !str_contains($smtpEncrypted, $smtpPlainText) && $smtpRoundTrip,
+    'authenticated SMTP passes readiness gate' => $smtpReadiness['ready'] && EmailService::transportLabel() === 'authenticated SMTP',
     'campaign requires approval and eligible consent' => $campaignRecipients >= 1 && ($campaignRow['status'] ?? '') === 'completed' && (int) $campaignRow['recipient_count'] === $campaignRecipients && $campaignWorkerResult['sent'] >= 1,
     'unsubscribe preview has no side effect' => $unsubscribePreview !== null && (int) $stillSubscribed['marketing_opt_in'] === 1,
     'signed unsubscribe suppresses marketing' => $unsubscribed !== null && (int) $receiptCustomerAfterUnsubscribe['marketing_opt_in'] === 0 && !empty($receiptCustomerAfterUnsubscribe['marketing_unsubscribed_at']),

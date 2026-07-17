@@ -741,21 +741,29 @@ final class Controller
                 }
                 $slug = self::uniqueSlug((string) ($_POST['brand'] ?? '') . '-' . $name, $product['id'] ?? null);
                 $status = in_array($_POST['status'] ?? '', ['draft','active','sold_out','archived'], true) ? $_POST['status'] : 'draft';
+                $featured = isset($_POST['featured']) ? 1 : 0;
+                if ($featured === 1 && !in_array($status, ['active', 'sold_out'], true)) {
+                    throw new RuntimeException('Only active or sold-out products can be featured on the homepage.');
+                }
+                $wasFeatured = (int) ($product['featured'] ?? 0) === 1;
+                $featuredAt = $featured === 1
+                    ? ($wasFeatured ? ((string) ($product['featured_at'] ?? '') ?: gmdate('Y-m-d H:i:s')) : gmdate('Y-m-d H:i:s'))
+                    : null;
                 $pdo = Database::pdo();
                 $pdo->beginTransaction();
                 try {
                     if ($product) {
                         $productId = (int) $product['id'];
-                        Database::execute('UPDATE products SET category_id=?,name=?,brand=?,slug=?,description=?,image_path=?,strain_type=?,potency=?,status=?,featured=?,updated_at=CURRENT_TIMESTAMP WHERE id=?', [
+                        Database::execute('UPDATE products SET category_id=?,name=?,brand=?,slug=?,description=?,image_path=?,strain_type=?,potency=?,status=?,featured=?,featured_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?', [
                             (int) ($_POST['category_id'] ?? 0), $name, trim((string) ($_POST['brand'] ?? '')), $slug,
                             trim((string) ($_POST['description'] ?? '')), $imagePath, trim((string) ($_POST['strain_type'] ?? '')),
-                            trim((string) ($_POST['potency'] ?? '')), $status, isset($_POST['featured']) ? 1 : 0, $productId,
+                            trim((string) ($_POST['potency'] ?? '')), $status, $featured, $featuredAt, $productId,
                         ]);
                     } else {
-                        Database::execute('INSERT INTO products (category_id,name,brand,slug,description,image_path,strain_type,potency,status,featured) VALUES (?,?,?,?,?,?,?,?,?,?)', [
+                        Database::execute('INSERT INTO products (category_id,name,brand,slug,description,image_path,strain_type,potency,status,featured,featured_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [
                             (int) ($_POST['category_id'] ?? 0), $name, trim((string) ($_POST['brand'] ?? '')), $slug,
                             trim((string) ($_POST['description'] ?? '')), $imagePath, trim((string) ($_POST['strain_type'] ?? '')),
-                            trim((string) ($_POST['potency'] ?? '')), $status, isset($_POST['featured']) ? 1 : 0,
+                            trim((string) ($_POST['potency'] ?? '')), $status, $featured, $featuredAt,
                         ]);
                         $productId = (int) $pdo->lastInsertId();
                     }
@@ -783,6 +791,8 @@ final class Controller
                         }
                     }
 
+                    $displacedFeatured = $featured === 1 ? Store::enforceFeaturedLimit($productId, 8) : [];
+
                     self::audit($product ? 'product.updated' : 'product.created', 'product', (string) $productId, ['variants' => count($variantsToSave)]);
                     $pdo->commit();
                 } catch (\Throwable $error) {
@@ -791,7 +801,14 @@ final class Controller
                     }
                     throw $error;
                 }
-                flash('success', 'Product saved.');
+                $message = 'Product saved.';
+                if ($featured === 1 && !$wasFeatured) {
+                    $message .= ' It now appears first in the homepage featured products.';
+                }
+                if (!empty($displacedFeatured)) {
+                    $message .= ' The oldest featured slot was released automatically.';
+                }
+                flash('success', $message);
                 redirect('admin/products');
             } catch (RuntimeException $error) {
                 flash('error', $error->getMessage());
@@ -949,17 +966,81 @@ final class Controller
                 $_POST['report_timezone'] = 'America/New_York';
             }
             $_POST['business_city'] = mb_substr(trim((string) ($_POST['business_city'] ?? '')), 0, 100);
-            foreach ($schema as $key => $type) {
-                $value = $type === 'bool' ? isset($_POST[$key]) : ($_POST[$key] ?? '');
-                if ($type === 'int' && str_ends_with($key, '_cents')) {
-                    $value = (int) round(((float) $value) * 100);
-                }
-                Store::setSetting($key, $value, $type);
+            $_POST['email_transport'] = in_array($_POST['email_transport'] ?? '', ['php_mail', 'smtp'], true) ? $_POST['email_transport'] : 'php_mail';
+            $_POST['smtp_encryption'] = in_array($_POST['smtp_encryption'] ?? '', ['ssl', 'tls', 'none'], true) ? $_POST['smtp_encryption'] : 'ssl';
+            $_POST['smtp_host'] = strtolower(mb_substr(trim((string) ($_POST['smtp_host'] ?? '')), 0, 253));
+            $_POST['smtp_username'] = mb_substr(trim((string) ($_POST['smtp_username'] ?? '')), 0, 320);
+            $_POST['smtp_port'] = max(1, min(65535, (int) ($_POST['smtp_port'] ?? 465)));
+            $_POST['smtp_timeout'] = max(3, min(30, (int) ($_POST['smtp_timeout'] ?? 10)));
+            $savedSmtpPassword = (string) Store::setting('smtp_password_encrypted', '');
+            $newSmtpPassword = (string) ($_POST['smtp_password'] ?? '');
+            if (strlen($newSmtpPassword) > 500) {
+                flash('error', 'The SMTP password is too long.');
+                redirect('admin/settings');
             }
-            self::audit('settings.updated','settings','store');
+            if (isset($_POST['smtp_clear_password'])) {
+                $savedSmtpPassword = '';
+            } elseif ($newSmtpPassword !== '') {
+                try {
+                    $savedSmtpPassword = SecretBox::encrypt($newSmtpPassword, 'smtp-password');
+                } catch (RuntimeException $error) {
+                    flash('error', $error->getMessage());
+                    redirect('admin/settings');
+                }
+            }
+            if ($_POST['email_transport'] === 'smtp') {
+                if (!preg_match('/^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)$/', $_POST['smtp_host'])) {
+                    flash('error', 'Enter a valid SMTP hostname without http:// or https://.');
+                    redirect('admin/settings');
+                }
+                if ($_POST['smtp_username'] === '' || $savedSmtpPassword === '') {
+                    flash('error', 'SMTP username and password are required when SMTP delivery is selected.');
+                    redirect('admin/settings');
+                }
+            }
+            $pdo = Database::pdo();
+            $pdo->beginTransaction();
+            try {
+                foreach ($schema as $key => $type) {
+                    $value = $type === 'bool' ? isset($_POST[$key]) : ($_POST[$key] ?? '');
+                    if ($type === 'int' && str_ends_with($key, '_cents')) {
+                        $value = (int) round(((float) $value) * 100);
+                    }
+                    Store::setSetting($key, $value, $type);
+                }
+                Store::setSetting('smtp_password_encrypted', $savedSmtpPassword, 'secret');
+                self::audit('settings.updated','settings','store', ['email_transport' => $_POST['email_transport']]);
+                $pdo->commit();
+            } catch (\Throwable $error) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                flash('error', 'Settings could not be saved: ' . $error->getMessage());
+                redirect('admin/settings');
+            }
             flash('success','Store settings saved.'); redirect('admin/settings');
         }
         render('admin/settings', ['title'=>'Store settings','schema'=>$schema]);
+    }
+
+    public static function adminEmailTransportTest(): void
+    {
+        $user = Auth::requirePermission('settings.manage');
+        verify_csrf();
+        $limit = RateLimiter::hit('smtp.test', (string) $user['id'], 6, 300, 300);
+        if (!$limit['allowed']) {
+            flash('error', 'Too many connection tests. Wait a few minutes before trying again.');
+            redirect('admin/settings');
+        }
+        try {
+            EmailService::testTransport();
+            self::audit('email.transport.tested', 'settings', 'email', ['transport' => EmailService::transport()]);
+            flash('success', 'SMTP connection, encryption and login were verified successfully.');
+        } catch (RuntimeException $error) {
+            self::audit('email.transport.test_failed', 'settings', 'email', ['transport' => EmailService::transport()]);
+            flash('error', 'SMTP test failed: ' . $error->getMessage());
+        }
+        redirect('admin/settings');
     }
 
     public static function adminOrderEmailReceipt(string $id): void
@@ -1164,7 +1245,7 @@ final class Controller
             'ordering_enabled'=>'bool','pickup_enabled'=>'bool','delivery_enabled'=>'bool','guest_checkout_enabled'=>'bool','registration_enabled'=>'bool','manual_confirmation'=>'bool','same_day_enabled'=>'bool','scheduled_enabled'=>'bool',
             'pay_at_pickup_enabled'=>'bool','manual_prepaid_enabled'=>'bool','pickup_minimum_cents'=>'int','delivery_minimum_cents'=>'int','extended_delivery_minimum_cents'=>'int','delivery_fee_cents'=>'int','service_areas'=>'string','extended_areas'=>'string','pickup_address'=>'string',
             'pos_enabled'=>'bool','pos_cash_enabled'=>'bool','pos_external_card_enabled'=>'bool','pos_tax_enabled'=>'bool','pos_tax_rate'=>'string','pos_print_receipt_enabled'=>'bool','pos_email_receipt_enabled'=>'bool','pos_manual_discount_enabled'=>'bool','pos_max_discount_percent'=>'int','customer_capture_enabled'=>'bool','marketing_opt_in_enabled'=>'bool',
-            'email_enabled'=>'bool','email_order_confirmation_enabled'=>'bool','email_from_name'=>'string','email_from_address'=>'string','email_reply_to'=>'string','order_notification_email'=>'string','email_dns_verified'=>'bool','marketing_campaigns_enabled'=>'bool','marketing_from_name'=>'string','marketing_from_address'=>'string','marketing_reply_to'=>'string','marketing_physical_address'=>'string','marketing_hopeline'=>'string','marketing_campaign_day'=>'int','staff_mfa_required'=>'bool',
+            'email_enabled'=>'bool','email_order_confirmation_enabled'=>'bool','email_transport'=>'string','smtp_host'=>'string','smtp_port'=>'int','smtp_encryption'=>'string','smtp_username'=>'string','smtp_timeout'=>'int','email_from_name'=>'string','email_from_address'=>'string','email_reply_to'=>'string','order_notification_email'=>'string','email_dns_verified'=>'bool','marketing_campaigns_enabled'=>'bool','marketing_from_name'=>'string','marketing_from_address'=>'string','marketing_reply_to'=>'string','marketing_physical_address'=>'string','marketing_hopeline'=>'string','marketing_campaign_day'=>'int','staff_mfa_required'=>'bool',
         ];
     }
 

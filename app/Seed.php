@@ -104,7 +104,7 @@ final class Seed
 
         $products = self::products();
         $productStmt = $pdo->prepare(
-            'INSERT INTO products (category_id, name, brand, slug, description, image_path, strain_type, potency, featured) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO products (category_id, name, brand, slug, description, image_path, strain_type, potency, featured, featured_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $variantStmt = $pdo->prepare(
             'INSERT INTO product_variants (product_id, label, price_cents, sale_price_cents, flavors, position) VALUES (?, ?, ?, ?, ?, ?)'
@@ -115,6 +115,7 @@ final class Seed
             $slug = self::slug($brand . '-' . $name);
             $productStmt->execute([
                 $categoryIds[$category], $name, $brand, $slug, $description, $image, $strain, $potency, $featured ? 1 : 0,
+                $featured ? '2000-01-01 00:00:00' : null,
             ]);
             $productId = (int) $pdo->lastInsertId();
             foreach ($variants as $position => $variant) {
@@ -122,6 +123,7 @@ final class Seed
                 $variantStmt->execute([$productId, $label, $price, $sale, $flavors, $position]);
             }
         }
+        Store::enforceFeaturedLimit(null, 8);
     }
 
     private static function products(): array

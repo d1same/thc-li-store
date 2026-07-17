@@ -17,7 +17,7 @@
 <section class="mobile-fast-shop container" aria-label="Quick menu access">
   <div class="mobile-fast-heading"><div><span class="eyebrow">Start shopping</span><h2>Explore the menu</h2></div><a href="<?= url('menu') ?>">View all<i data-lucide="arrow-right"></i></a></div>
   <div class="mobile-category-rail"><?php $mobileIcons=['flower'=>'flower-2','vapes'=>'battery-charging','edibles'=>'cookie','concentrates'=>'gem','pre-rolls'=>'cigarette']; foreach($categories as $category): ?><a href="<?= url('menu?category='.$category['slug']) ?>"><span><i data-lucide="<?= e($mobileIcons[$category['slug']]??'leaf') ?>"></i></span><?= e($category['name']) ?></a><?php endforeach; ?></div>
-  <div class="mobile-product-rail"><?php foreach(array_slice($featured,0,6) as $product) require APP_ROOT.'/app/Views/partials/product-card.php'; ?></div>
+  <div class="mobile-product-rail"><?php foreach(array_slice($featured,0,8) as $product) require APP_ROOT.'/app/Views/partials/product-card.php'; ?></div>
 </section>
 
 <section class="promo-section container">

@@ -62,8 +62,34 @@ final class Store
                 JOIN categories c ON c.id = p.category_id
                 JOIN product_variants v ON v.product_id = p.id
                 WHERE ' . implode(' AND ', $where) . '
-                GROUP BY p.id ORDER BY p.featured DESC, c.position, p.name';
+                GROUP BY p.id
+                ORDER BY p.featured DESC, COALESCE(p.featured_at, \'\') DESC, c.position, p.name, p.id';
         return Database::all($sql, $params);
+    }
+
+    public static function enforceFeaturedLimit(?int $preferredProductId = null, int $limit = 8): array
+    {
+        $limit = max(1, min(24, $limit));
+        $params = [];
+        $preference = '';
+        if ($preferredProductId !== null) {
+            $preference = 'CASE WHEN p.id = ? THEN 0 ELSE 1 END,';
+            $params[] = $preferredProductId;
+        }
+        $params[] = $limit;
+        $overflow = Database::all(
+            "SELECT p.id,p.name
+             FROM products p
+             JOIN categories c ON c.id=p.category_id
+             WHERE p.featured=1
+             ORDER BY {$preference} COALESCE(p.featured_at,'' ) DESC,c.position,p.name,p.id
+             LIMIT -1 OFFSET ?",
+            $params
+        );
+        foreach ($overflow as $product) {
+            Database::execute('UPDATE products SET featured=0,featured_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?', [(int) $product['id']]);
+        }
+        return $overflow;
     }
 
     public static function productBySlug(string $slug): ?array

@@ -101,10 +101,10 @@ final class EmailService
             try {
                 $sent = self::deliver($row);
                 if (!$sent) {
-                    throw new RuntimeException('The server mail transport rejected the message.');
+                    throw new RuntimeException('The configured email transport rejected the message.');
                 }
                 Database::execute("UPDATE email_queue SET status='sent',sent_at=CURRENT_TIMESTAMP,locked_at=NULL,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?", [(int) $row['id']]);
-                self::event((int) $row['id'], 'sent', 'Accepted by the server mail transport.');
+                self::event((int) $row['id'], 'sent', 'Accepted by ' . self::transportLabel() . '.');
                 self::afterStatus($row, true);
                 $result['sent']++;
             } catch (Throwable $error) {
@@ -125,9 +125,22 @@ final class EmailService
 
     public static function readiness(bool $marketing = false): array
     {
+        $transport = self::transport();
         $checks = [
             'email_enabled' => Store::setting('email_enabled', false) === true,
+            'email_transport' => in_array($transport, ['php_mail', 'smtp'], true),
         ];
+        if ($transport === 'smtp') {
+            $checks += [
+                'smtp_host' => self::validSmtpHost((string) Store::setting('smtp_host', '')),
+                'smtp_port' => (int) Store::setting('smtp_port', 0) >= 1 && (int) Store::setting('smtp_port', 0) <= 65535,
+                'smtp_encryption' => in_array(Store::setting('smtp_encryption', ''), ['ssl', 'tls', 'none'], true),
+                'smtp_username' => trim((string) Store::setting('smtp_username', '')) !== '',
+                'smtp_password' => trim((string) Store::setting('smtp_password_encrypted', '')) !== '',
+                'openssl' => extension_loaded('openssl'),
+                'app_key' => strlen((string) getenv('APP_KEY')) >= 32,
+            ];
+        }
         if ($marketing) {
             $license = trim((string) Store::setting('license_number', ''));
             $checks += [
@@ -143,6 +156,25 @@ final class EmailService
             $checks['receipt_from_address'] = filter_var(Store::setting('email_from_address', ''), FILTER_VALIDATE_EMAIL) !== false;
         }
         return ['ready' => !in_array(false, $checks, true), 'checks' => $checks];
+    }
+
+    public static function transport(): string
+    {
+        $transport = (string) Store::setting('email_transport', 'php_mail');
+        return in_array($transport, ['php_mail', 'smtp'], true) ? $transport : 'php_mail';
+    }
+
+    public static function transportLabel(): string
+    {
+        return self::transport() === 'smtp' ? 'authenticated SMTP' : 'PHP mail';
+    }
+
+    public static function testTransport(): void
+    {
+        if (self::transport() !== 'smtp') {
+            throw new RuntimeException('Choose Authenticated SMTP in Settings and save it before testing.');
+        }
+        SmtpClient::test(self::smtpConfig());
     }
 
     public static function unsubscribeToken(array $customer): ?string
@@ -228,7 +260,42 @@ final class EmailService
             $headers[] = 'List-Unsubscribe: <' . $unsubscribe . '>';
             $headers[] = 'List-Unsubscribe-Post: List-Unsubscribe=One-Click';
         }
-        return mail($to, self::headerValue((string) $row['subject']), $body, implode("\r\n", $headers));
+        $subject = self::headerValue((string) $row['subject']);
+        if (self::transport() === 'smtp') {
+            $domain = substr(strrchr($from, '@') ?: '@localhost', 1);
+            $smtpHeaders = [
+                'Date: ' . date(DATE_RFC2822),
+                'Message-ID: <' . bin2hex(random_bytes(16)) . '@' . $domain . '>',
+                'To: <' . $to . '>',
+                'Subject: ' . $subject,
+                ...$headers,
+            ];
+            SmtpClient::send(self::smtpConfig(), $from, $to, implode("\r\n", $smtpHeaders) . "\r\n\r\n" . $body);
+            return true;
+        }
+        return mail($to, $subject, $body, implode("\r\n", $headers));
+    }
+
+    /** @return array{host:string,port:int,encryption:string,username:string,password:string,timeout:int} */
+    private static function smtpConfig(): array
+    {
+        $encrypted = trim((string) Store::setting('smtp_password_encrypted', ''));
+        if ($encrypted === '') {
+            throw new RuntimeException('Save the SMTP password before using SMTP delivery.');
+        }
+        return [
+            'host' => strtolower(trim((string) Store::setting('smtp_host', ''))),
+            'port' => (int) Store::setting('smtp_port', 465),
+            'encryption' => (string) Store::setting('smtp_encryption', 'ssl'),
+            'username' => trim((string) Store::setting('smtp_username', '')),
+            'password' => SecretBox::decrypt($encrypted, 'smtp-password'),
+            'timeout' => max(3, min(30, (int) Store::setting('smtp_timeout', 10))),
+        ];
+    }
+
+    private static function validSmtpHost(string $host): bool
+    {
+        return preg_match('/^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)$/', trim($host)) === 1;
     }
 
     private static function afterStatus(array $row, bool $sent): void

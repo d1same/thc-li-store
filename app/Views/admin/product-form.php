@@ -80,7 +80,7 @@ $variantRows = $variants ?: [['label' => 'Single', 'price' => '', 'sale_price' =
         <label>Status
           <select name="status"><?php foreach (['draft','active','sold_out','archived'] as $status): ?><option value="<?= $status ?>" <?= ($product['status'] ?? 'active') === $status ? 'selected' : '' ?>><?= e(ucwords(str_replace('_', ' ', $status))) ?></option><?php endforeach; ?></select>
         </label>
-        <label class="check-row full"><input type="checkbox" name="featured" value="1" <?= !empty($product['featured']) ? 'checked' : '' ?>><span>Feature this product on the homepage</span></label>
+        <label class="check-row full"><input type="checkbox" name="featured" value="1" <?= !empty($product['featured']) ? 'checked' : '' ?>><span><strong>Feature this product on the homepage</strong><small>Up to 8 products are featured. A newly featured product moves to the front and releases the oldest slot.</small></span></label>
       </div>
     </div>
   </div>

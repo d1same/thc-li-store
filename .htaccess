@@ -11,6 +11,14 @@ DirectoryIndex index.php
 
   # Keep application code, runtime data, and repository files private.
   RewriteRule (^|/)\.(?!well-known/) - [F,L]
+
+  # Public media lives below /public even when cPanel points the domain at the
+  # repository root. Resolve these safe files before denying the legacy root
+  # /uploads directory; otherwise every product image receives a 403.
+  RewriteCond %{DOCUMENT_ROOT}/public/$1/$2 -f [OR]
+  RewriteCond %{DOCUMENT_ROOT}/public/$1/$2 -d
+  RewriteRule ^(assets|uploads)/(.*)$ public/$1/$2 [L,NC]
+
   RewriteRule ^(?:app|database|storage|scripts|tests|tmp|graphify-out|uploads)(?:/|$) - [F,L,NC]
   RewriteRule ^(?:(?:README|SECURITY)\.md|\.cpanel\.yml|\.env(?:\..*)?)$ - [F,L,NC]
 

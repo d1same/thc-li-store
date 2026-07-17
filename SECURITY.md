@@ -8,6 +8,8 @@
 - Use HTTPS only. Confirm the live response includes HSTS, CSP, `nosniff`, frame protection, referrer policy, and a `Secure; HttpOnly; SameSite=Lax` session cookie.
 - In cPanel File Manager, use `700` for `storage`, `storage/backups`, and `storage/imports`; use `600` for `.env`, SQLite files, imports, and backup files. The application also applies restrictive permissions when it creates these files.
 - Keep the five-minute email worker and nightly backup commands CLI-only.
+- Use a dedicated mailbox password for SMTP, not the cPanel account password. The Admin settings page encrypts the saved SMTP password with AES-256-GCM derived from `APP_KEY`; the value is never rendered back into HTML or written to audit logs.
+- Prefer SSL/TLS port 465 or STARTTLS port 587 with certificate verification. Use the rate-limited **Test saved SMTP connection** action after configuration and after any mailbox-password change.
 
 ## Owner activation checklist
 
@@ -25,7 +27,7 @@
 - The owner can set a new temporary staff password from **Staff**. The staff member must replace it at next sign-in.
 - Preserve `storage/shop.sqlite`, `.env`, and the latest backup before incident investigation. Do not email the database or customer export.
 - Review **Security center** for recent sign-ins, lockouts, MFA changes, staff changes, setup attempts, and customer exports.
-- Rotate `APP_KEY` only with a planned MFA reset: existing encrypted MFA secrets and import previews depend on it.
+- Rotate `APP_KEY` only with a planned MFA reset and SMTP password re-entry: existing encrypted MFA secrets, SMTP credentials, and import previews depend on it.
 
 ## Automated checks
 

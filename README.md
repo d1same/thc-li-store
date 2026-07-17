@@ -27,6 +27,7 @@ The SQLite database, runtime configuration, uploaded photos, and backups must no
 - Tracked status is automatic: 6 or more is in stock, 1–5 is low stock, and 0 is sold out.
 - Placing an order reserves stock immediately. Cancelling the order restores those units exactly once.
 - The Products table and owner dashboard show low-stock and sold-out options. Checkout rechecks inventory to prevent overselling.
+- The homepage has eight featured-product slots. Checking **Feature this product on the homepage** moves a newly featured active product to the first slot and automatically releases the oldest slot; the same eight are available in the mobile product rail.
 
 ## Point of sale
 
@@ -53,12 +54,15 @@ The SQLite database, runtime configuration, uploaded photos, and backups must no
 - New online-order alerts are sent to `orders@thc-li.com` with a secure Admin link; full delivery details remain in the authenticated order screen.
 - Run the queue every five minutes from cPanel Cron: `*/5 * * * * /usr/bin/php /home/thclidave/public_html/scripts/email-worker.php` (confirm the PHP path first).
 - Use `receipts@thc-li.com` for receipts/order confirmations and `updates@thc-li.com` for approved product campaigns. Configure their sender names and reply-to addresses together with the physical business address, license, and SPF/DKIM/DMARC verification under **Owner desk → Settings** before enabling email.
+- Under **Settings → Mail transport**, choose **Authenticated SMTP**, enter the host, port, encryption, full mailbox username, and mailbox password, then save. The SMTP password is encrypted with `APP_KEY` and is never displayed again.
+- For Stablepoint/cPanel, copy the exact values from **Email Accounts → Connect Devices**. Typical settings are `mail.thc-li.com` with SSL port `465`, or STARTTLS port `587`, and the full `receipts@thc-li.com` address as the username.
+- After saving, use **Test saved SMTP connection**. This verifies the network connection, certificate/encryption, and mailbox login without sending a customer message. Connection tests are rate-limited and audited.
 - Customer imports accept CSV files exported from Excel. Download the template, upload for an encrypted preview, and confirm after reviewing matches. The importer never replaces order history or existing private notes.
 - Marketing imports require an explicit yes plus a consent date and source. Unsubscribed contacts remain suppressed unless they later give new explicit consent.
 - Product campaigns are always drafts first. An authorized user must approve each campaign; only eligible opted-in customers are queued, and every message contains an unsubscribe link and compliance footer.
 - To create (but never send) a monthly draft automatically, run `0 9 * * * /usr/bin/php /home/thclidave/public_html/scripts/monthly-campaign-draft.php`. The configured day controls when the draft is created.
 
-Local PHP `mail()` is the initial cPanel transport. Confirm delivery with the host and set SPF, DKIM, and DMARC for the exact sending domain. A “sent” status records transport acceptance, not guaranteed inbox placement.
+Authenticated SMTP is recommended. PHP `mail()` remains available as a rollback option. Confirm delivery with the host and set SPF, DKIM, and DMARC for the exact sending domain. A “sent” status records transport acceptance, not guaranteed inbox placement.
 
 ## Staff permissions
 

@@ -71,6 +71,7 @@ $router->post('/admin/email/campaigns/{id}/cancel', [Controller::class, 'adminEm
 $router->post('/admin/email/queue/run', [Controller::class, 'adminEmailQueueRun']);
 $router->get('/admin/settings', [Controller::class, 'adminSettings']);
 $router->post('/admin/settings', [Controller::class, 'adminSettings']);
+$router->post('/admin/settings/email-test', [Controller::class, 'adminEmailTransportTest']);
 $router->get('/admin/promotions', [Controller::class, 'adminPromotions']);
 $router->post('/admin/promotions', [Controller::class, 'adminPromotions']);
 $router->post('/admin/promotions/{id}/toggle', [Controller::class, 'adminPromotionToggle']);
